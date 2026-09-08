@@ -6,7 +6,7 @@
 import { ref, computed } from 'vue'
 import type { SsoConfig, AuthState, UseAuthOptions } from '../types'
 import { getToken, setToken, getRefreshToken, setRefreshToken, clearTokens, getTokenKind, setTokenKind, decodeOidcClaims } from '../utils/token'
-import { refreshOidcToken } from './sso'
+import { refreshOidcToken } from '../utils/sso'
 
 export interface UseAuthOptions {
   /** SSO 配置（可选，不配置则禁用 SSO 功能） */

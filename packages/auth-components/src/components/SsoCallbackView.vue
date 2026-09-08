@@ -17,7 +17,8 @@ import { useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
 import { Loading } from '@element-plus/icons-vue'
 import type { SsoConfig } from '../types'
-import { handleSsoCallback, decodeOidcClaims, setToken, getToken } from '../utils/sso'
+import { handleSsoCallback } from '../utils/sso'
+import { setToken, getToken, decodeOidcClaims } from '../utils/token'
 
 const props = defineProps<{
   config: SsoConfig

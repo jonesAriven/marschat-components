@@ -12,9 +12,12 @@ import org.springframework.web.method.support.HandlerMethodArgumentResolver;
 import org.springframework.web.method.support.ModelAndViewContainer;
 
 /**
- * 解析 {@code @MarsUser LoginUser} 参数：从 Authorization: Bearer xxx 取 token 并验签。
+ * 解析 {@code @MarsUser LoginUser} 参数：从请求中获取 token 并验签。
  * <p>
- * 支持的 header 顺序：Authorization (Bearer) → X-Auth-Token（兼容网关转发场景）。
+ * Token 获取优先级（SSO 增强）：
+ * 1. Cookie（SSO 模式，sso_access_token）
+ * 2. Authorization Header (Bearer)
+ * 3. X-Auth-Token Header（兼容网关转发场景）
  */
 public class MarsUserArgumentResolver implements HandlerMethodArgumentResolver {
 
@@ -57,14 +60,23 @@ public class MarsUserArgumentResolver implements HandlerMethodArgumentResolver {
         }
     }
 
+    /**
+     * 从请求中提取 Token（支持 SSO Cookie 和 Legacy Header）
+     * <p>
+     * 优先使用 TokenProvider.resolveToken() 统一解析
+     */
     private String extractToken(HttpServletRequest request) {
         if (request == null) {
             return null;
         }
-        String header = request.getHeader("Authorization");
-        if (header != null && header.startsWith("Bearer ")) {
-            return header.substring(7);
+        
+        // 使用 TokenProvider 的统一解析方法（支持 Cookie + Header）
+        String token = tokenProvider.resolveToken(request);
+        if (token != null && !token.isBlank()) {
+            return token;
         }
+        
+        // 兼容：X-Auth-Token Header（网关转发场景）
         return request.getHeader("X-Auth-Token");
     }
 

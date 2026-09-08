@@ -8,6 +8,8 @@ import io.jsonwebtoken.ExpiredJwtException;
 import io.jsonwebtoken.JwtException;
 import io.jsonwebtoken.Jwts;
 import io.jsonwebtoken.security.Keys;
+import jakarta.servlet.http.Cookie;
+import jakarta.servlet.http.HttpServletRequest;
 
 import javax.crypto.SecretKey;
 import java.nio.charset.StandardCharsets;
@@ -172,5 +174,70 @@ public class TokenProvider {
 
     public long getAccessTokenExpiration() {
         return properties.getAccessTokenExpiration();
+    }
+
+    // ========== SSO Cookie 支持 ==========
+
+    /** SSO Access Token Cookie 名称（与前端和 auth-center 配置一致） */
+    private static final String SSO_ACCESS_TOKEN_COOKIE_NAME = "sso_access_token";
+
+    /**
+     * 从 HttpServletRequest 中解析 Token（多来源）
+     * <p>
+     * 优先级：
+     * 1. Cookie（SSO 模式，由 auth-center 设置的跨域 Cookie）
+     * 2. Authorization Header（Legacy 模式，Bearer token）
+     *
+     * @param request HTTP 请求
+     * @return Token 字符串，未找到返回 null
+     */
+    public String resolveToken(HttpServletRequest request) {
+        // 1. 先尝试从 Cookie 获取（SSO 模式）
+        String tokenFromCookie = getTokenFromCookie(request);
+        if (tokenFromCookie != null && !tokenFromCookie.isBlank()) {
+            return tokenFromCookie;
+        }
+
+        // 2. 再尝试从 Header 获取（Legacy 模式）
+        String header = request.getHeader("Authorization");
+        if (header != null && header.startsWith("Bearer ")) {
+            return header.substring(7);
+        }
+
+        return null;
+    }
+
+    /**
+     * 从 Cookie 中获取 SSO Access Token
+     *
+     * @param request HTTP 请求
+     * @return Token 字符串，未找到返回 null
+     */
+    public String getTokenFromCookie(HttpServletRequest request) {
+        if (request.getCookies() == null) {
+            return null;
+        }
+        for (Cookie cookie : request.getCookies()) {
+            if (SSO_ACCESS_TOKEN_COOKIE_NAME.equals(cookie.getName())) {
+                return cookie.getValue();
+            }
+        }
+        return null;
+    }
+
+    /**
+     * 从请求中解析并验证用户信息（便捷方法）
+     * <p>
+     * 自动从 Cookie 或 Header 获取 Token 并验证
+     *
+     * @param request HTTP 请求
+     * @return LoginUser 对象，Token 无效时返回 null
+     */
+    public LoginUser resolveAndValidateUser(HttpServletRequest request) {
+        String token = resolveToken(request);
+        if (token == null || !validateToken(token)) {
+            return null;
+        }
+        return parseUser(token);
     }
 }
