@@ -1,0 +1,4 @@
+com.marschat.common.exception.GlobalExceptionHandlerAutoConfiguration
+com.marschat.common.trace.TraceIdAutoConfig
+com.marschat.common.event.EventAutoConfig
+com.marschat.common.mybatis.MybatisPlusAutoConfig

@@ -1,0 +1,3 @@
+com.marschat.auth.AuthJwtAutoConfig
+com.marschat.auth.AuthWebAutoConfig
+com.marschat.auth.AuthFeignAutoConfig

@@ -1,0 +1,171 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 https://maven.apache.org/xsd/maven-4.0.0.xsd">
+    <modelVersion>4.0.0</modelVersion>
+
+    <!--
+      auth-core — 认证公共库（独立 git 仓库 / 独立版本线）
+      - SSO Phase 1：统一 jjwt HS256 验签 + LoginUser 解析 + Feign token 透传
+      - SSO Phase 2 (2.0.0)：新增 OIDC RS256 双验签（JWKS 拉取 + TTL 缓存 + kty=RSA 收取）
+        TokenProvider.validateToken 先 RS256 后回退 HS256，平滑过渡期两种 token 并存
+      - 前身为各服务各自复制的 JwtTokenProvider / JwtUtil / FeignConfig
+      - 下游引入后自动装配 TokenProvider，无需再手写 JWT 工具类
+      - Gitee: git@gitee.com:jonesAriven/auth-core.git
+    -->
+    <parent>
+        <groupId>org.springframework.boot</groupId>
+        <artifactId>spring-boot-starter-parent</artifactId>
+        <version>3.2.5</version>
+        <relativePath/>
+    </parent>
+
+    <groupId>com.marschat</groupId>
+    <artifactId>auth-core</artifactId>
+    <version>2.0.0</version>
+    <name>auth-core</name>
+    <description>认证公共库（独立 jar）：jjwt HS256 验签 + OIDC RS256 双验签 / LoginUser 解析 / Feign token 透传 —— SSO Phase 2 落地件</description>
+
+    <scm>
+        <connection>scm:git:git@gitee.com:jonesAriven/auth-core.git</connection>
+        <developerConnection>scm:git:git@gitee.com:jonesAriven/auth-core.git</developerConnection>
+        <url>https://gitee.com/jonesAriven/auth-core</url>
+    </scm>
+
+    <properties>
+        <java.version>21</java.version>
+        <maven.compiler.source>21</maven.compiler.source>
+        <maven.compiler.target>21</maven.compiler.target>
+        <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
+        <project.reporting.outputEncoding>UTF-8</project.reporting.outputEncoding>
+        <spring-cloud.version>2023.0.3</spring-cloud.version>
+        <jjwt.version>0.12.5</jjwt.version>
+    </properties>
+
+    <dependencyManagement>
+        <dependencies>
+            <dependency>
+                <groupId>org.springframework.cloud</groupId>
+                <artifactId>spring-cloud-dependencies</artifactId>
+                <version>${spring-cloud.version}</version>
+                <type>pom</type>
+                <scope>import</scope>
+            </dependency>
+        </dependencies>
+    </dependencyManagement>
+
+    <dependencies>
+        <!-- Spring Boot Web (for HandlerMethodArgumentResolver, optional) -->
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-web</artifactId>
+            <optional>true</optional>
+        </dependency>
+
+        <!-- JJWT -->
+        <dependency>
+            <groupId>io.jsonwebtoken</groupId>
+            <artifactId>jjwt-api</artifactId>
+            <version>${jjwt.version}</version>
+        </dependency>
+        <dependency>
+            <groupId>io.jsonwebtoken</groupId>
+            <artifactId>jjwt-impl</artifactId>
+            <version>${jjwt.version}</version>
+            <scope>runtime</scope>
+        </dependency>
+        <dependency>
+            <groupId>io.jsonwebtoken</groupId>
+            <artifactId>jjwt-jackson</artifactId>
+            <version>${jjwt.version}</version>
+            <scope>runtime</scope>
+        </dependency>
+
+        <!-- Nimbus JOSE+JWT：解析 OIDC JWKS（RS256 双验签过渡期，与 kb-auth SAS 自带版本同族） -->
+        <dependency>
+            <groupId>com.nimbusds</groupId>
+            <artifactId>nimbus-jose-jwt</artifactId>
+            <version>9.37.3</version>
+        </dependency>
+
+        <!-- OpenFeign (for token 透传 interceptor, optional) -->
+        <dependency>
+            <groupId>org.springframework.cloud</groupId>
+            <artifactId>spring-cloud-starter-openfeign</artifactId>
+            <optional>true</optional>
+        </dependency>
+
+        <!-- Lombok -->
+        <dependency>
+            <groupId>org.projectlombok</groupId>
+            <artifactId>lombok</artifactId>
+            <optional>true</optional>
+        </dependency>
+
+        <!-- Test -->
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-test</artifactId>
+            <scope>test</scope>
+        </dependency>
+    </dependencies>
+
+    <build>
+        <plugins>
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-compiler-plugin</artifactId>
+                <configuration>
+                    <source>21</source>
+                    <target>21</target>
+                    <encoding>UTF-8</encoding>
+                    <parameters>true</parameters>
+                </configuration>
+            </plugin>
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-source-plugin</artifactId>
+                <executions>
+                    <execution>
+                        <id>attach-sources</id>
+                        <goals><goal>jar-no-fork</goal></goals>
+                    </execution>
+                </executions>
+            </plugin>
+        </plugins>
+    </build>
+
+    <!-- Nexus 私服仓库（强制：禁止使用任何非 Nexus 源） -->
+    <repositories>
+        <repository>
+            <id>nexus-public</id>
+            <name>Nexus Public Repository</name>
+            <url>https://nexus.marschat.online/repository/maven-public/</url>
+            <releases><enabled>true</enabled></releases>
+            <snapshots><enabled>true</enabled></snapshots>
+        </repository>
+    </repositories>
+
+    <pluginRepositories>
+        <pluginRepository>
+            <id>nexus-public</id>
+            <name>Nexus Public Repository</name>
+            <url>https://nexus.marschat.online/repository/maven-public/</url>
+            <releases><enabled>true</enabled></releases>
+            <snapshots><enabled>true</enabled></snapshots>
+        </pluginRepository>
+    </pluginRepositories>
+
+    <distributionManagement>
+        <repository>
+            <id>nexus-releases</id>
+            <name>Nexus Releases Repository</name>
+            <url>https://nexus.marschat.online/repository/maven-releases/</url>
+        </repository>
+        <snapshotRepository>
+            <id>nexus-snapshots</id>
+            <name>Nexus Snapshots Repository</name>
+            <url>https://nexus.marschat.online/repository/maven-snapshots/</url>
+        </snapshotRepository>
+    </distributionManagement>
+</project>

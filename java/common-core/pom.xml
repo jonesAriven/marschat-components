@@ -1,0 +1,200 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 https://maven.apache.org/xsd/maven-4.0.0.xsd">
+    <modelVersion>4.0.0</modelVersion>
+
+    <!--
+      common-core — 全仓库公共核心库（独立 git 仓库 / 独立版本线）
+      - 前身为 mykng/kb-common 1.2.0；2026-09-06 独立成仓，坐标与包名一并中性化
+      - 包名 com.kb.common -> com.marschat.common（脱离 knowledge-base 业务语义）
+      - 下游只需引 GAV，能力经 AutoConfiguration 自动装配，无需手工 @Import
+      - Gitee: git@gitee.com:jonesAriven/common-core.git
+    -->
+    <parent>
+        <groupId>org.springframework.boot</groupId>
+        <artifactId>spring-boot-starter-parent</artifactId>
+        <version>3.2.5</version>
+        <relativePath/>
+    </parent>
+
+    <groupId>com.marschat</groupId>
+    <artifactId>common-core</artifactId>
+    <version>1.1.0</version>
+    <name>common-core</name>
+    <description>公共核心库（独立 jar）：统一返回、异常体系、链路追踪、事件总线、业务断言 —— 发布到 Nexus，供全部自研服务引用</description>
+
+    <scm>
+        <connection>scm:git:git@gitee.com:jonesAriven/common-core.git</connection>
+        <developerConnection>scm:git:git@gitee.com:jonesAriven/common-core.git</developerConnection>
+        <url>https://gitee.com/jonesAriven/common-core</url>
+    </scm>
+
+    <properties>
+        <java.version>21</java.version>
+        <maven.compiler.source>21</maven.compiler.source>
+        <maven.compiler.target>21</maven.compiler.target>
+        <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
+        <project.reporting.outputEncoding>UTF-8</project.reporting.outputEncoding>
+        <spring-cloud.version>2023.0.3</spring-cloud.version>
+        <hutool.version>5.8.27</hutool.version>
+        <mybatis-plus.version>3.5.6</mybatis-plus.version>
+    </properties>
+
+    <dependencyManagement>
+        <dependencies>
+            <!-- Spring Cloud BOM（openfeign 版本管理） -->
+            <dependency>
+                <groupId>org.springframework.cloud</groupId>
+                <artifactId>spring-cloud-dependencies</artifactId>
+                <version>${spring-cloud.version}</version>
+                <type>pom</type>
+                <scope>import</scope>
+            </dependency>
+            <!-- Hutool 版本（原由 kb-parent 管理） -->
+            <dependency>
+                <groupId>cn.hutool</groupId>
+                <artifactId>hutool-all</artifactId>
+                <version>${hutool.version}</version>
+            </dependency>
+        </dependencies>
+    </dependencyManagement>
+
+    <dependencies>
+        <!-- Spring Boot Web (for Interceptor, RestControllerAdvice) -->
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-web</artifactId>
+            <optional>true</optional>
+        </dependency>
+
+        <!-- Spring AOP (for WebLogAspect, 非 optional 让 aspectjweaver 传递给下游服务) -->
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-aop</artifactId>
+        </dependency>
+
+        <!-- Validation -->
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-validation</artifactId>
+            <optional>true</optional>
+        </dependency>
+
+        <!-- Lombok -->
+        <dependency>
+            <groupId>org.projectlombok</groupId>
+            <artifactId>lombok</artifactId>
+            <optional>true</optional>
+        </dependency>
+
+        <!-- Hutool -->
+        <dependency>
+            <groupId>cn.hutool</groupId>
+            <artifactId>hutool-all</artifactId>
+        </dependency>
+
+        <!-- OpenFeign (for FeignTraceIdInterceptor, optional) -->
+        <dependency>
+            <groupId>org.springframework.cloud</groupId>
+            <artifactId>spring-cloud-starter-openfeign</artifactId>
+            <optional>true</optional>
+        </dependency>
+
+        <!-- Redis (for event publishing, optional) -->
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-data-redis</artifactId>
+            <optional>true</optional>
+        </dependency>
+
+        <!-- MyBatis-Plus (for 分页插件 + 自动填充, optional: 仅下游用了 MP 才装配) -->
+        <dependency>
+            <groupId>com.baomidou</groupId>
+            <artifactId>mybatis-plus-spring-boot3-starter</artifactId>
+            <version>${mybatis-plus.version}</version>
+            <optional>true</optional>
+        </dependency>
+
+        <!-- Logstash Logback Encoder（结构化 JSON 日志输出，Loki 友好） -->
+        <dependency>
+            <groupId>net.logstash.logback</groupId>
+            <artifactId>logstash-logback-encoder</artifactId>
+            <version>8.0</version>
+        </dependency>
+
+        <!-- Logback Kafka Appender（日志推送到 Kafka，按 profile 启用） -->
+        <dependency>
+            <groupId>com.github.danielwegener</groupId>
+            <artifactId>logback-kafka-appender</artifactId>
+            <version>0.2.0-RC2</version>
+        </dependency>
+
+        <!-- Test -->
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-test</artifactId>
+            <scope>test</scope>
+        </dependency>
+    </dependencies>
+
+    <build>
+        <plugins>
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-compiler-plugin</artifactId>
+                <configuration>
+                    <source>21</source>
+                    <target>21</target>
+                    <encoding>UTF-8</encoding>
+                    <parameters>true</parameters>
+                </configuration>
+            </plugin>
+            <!-- 发布源码 jar（便于下游 IDE 调试） -->
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-source-plugin</artifactId>
+                <executions>
+                    <execution>
+                        <id>attach-sources</id>
+                        <goals><goal>jar-no-fork</goal></goals>
+                    </execution>
+                </executions>
+            </plugin>
+        </plugins>
+    </build>
+
+    <!-- Nexus 私服仓库（强制：禁止使用任何非 Nexus 源） -->
+    <repositories>
+        <repository>
+            <id>nexus-public</id>
+            <name>Nexus Public Repository</name>
+            <url>https://nexus.marschat.online/repository/maven-public/</url>
+            <releases><enabled>true</enabled></releases>
+            <snapshots><enabled>true</enabled></snapshots>
+        </repository>
+    </repositories>
+
+    <pluginRepositories>
+        <pluginRepository>
+            <id>nexus-public</id>
+            <name>Nexus Public Repository</name>
+            <url>https://nexus.marschat.online/repository/maven-public/</url>
+            <releases><enabled>true</enabled></releases>
+            <snapshots><enabled>true</enabled></snapshots>
+        </pluginRepository>
+    </pluginRepositories>
+
+    <distributionManagement>
+        <repository>
+            <id>nexus-releases</id>
+            <name>Nexus Releases Repository</name>
+            <url>https://nexus.marschat.online/repository/maven-releases/</url>
+        </repository>
+        <snapshotRepository>
+            <id>nexus-snapshots</id>
+            <name>Nexus Snapshots Repository</name>
+            <url>https://nexus.marschat.online/repository/maven-snapshots/</url>
+        </snapshotRepository>
+    </distributionManagement>
+</project>

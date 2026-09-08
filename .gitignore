@@ -1,0 +1,55 @@
+# === 依赖缓存 ===
+node_modules/
+.pnpm-store/
+
+# === 构建产物 ===
+dist/
+*.tsbuildinfo
+target/
+classes/
+*.jar
+*.war
+*.ear
+
+# === IDE ===
+.idea/
+.vscode/
+*.iml
+*.iws
+*.ipr
+out/
+
+# === 系统 ===
+.DS_Store
+Thumbs.db
+Desktop.ini
+
+# === 日志 ===
+*.log
+logs/
+
+# === 环境配置 ===
+.env
+.env.local
+.env.*.local
+
+# === 测试覆盖率 ===
+coverage/
+.nyc_output/
+
+# === Maven ===
+.mvn/
+mvnw
+mvnw.cmd
+
+# === pnpm/changeset ===
+.changeset/
+.pnpm-debug.log*
+
+# === 临时文件 ===
+tmp/
+temp/
+*.tmp
+*.bak
+*.swp
+*~

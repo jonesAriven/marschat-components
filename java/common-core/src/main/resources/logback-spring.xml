@@ -1,0 +1,71 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- common-core 统一日志配置（v2 统一日志 + 链路追踪）
+     - Console → JSON 格式（Docker stdout → Promtail → Loki）
+     - FILE → 保留原有滚动文件格式（兼容已有运维习惯）
+     - traceId 自动从 MDC 注入（由 TraceIdInterceptor 提供）
+     - 通过 springProfile 支持 kafka-log 扩展
+-->
+<configuration>
+    <springProperty scope="context" name="APP_NAME" source="spring.application.name"
+                    defaultValue="kb-service"/>
+
+    <!-- ============ Console Appender（JSON 结构化，Loki 友好） ============ -->
+    <appender name="CONSOLE" class="ch.qos.logback.core.ConsoleAppender">
+        <encoder class="net.logstash.logback.encoder.LogstashEncoder">
+            <!-- 包含 MDC 中的 traceId/spanId -->
+            <includeMdc>true</includeMdc>
+            <!-- 服务名 -->
+            <customFields>{"service":"${APP_NAME}"}</customFields>
+            <!-- 关闭 LogstashEncoder 自带的版本号字段 -->
+            <writeVersionAsInteger>false</writeVersionAsInteger>
+        </encoder>
+    </appender>
+
+    <!-- ============ FILE Appender（保留原有文本格式，方便运维排查） ============ -->
+    <appender name="FILE" class="ch.qos.logback.core.rolling.RollingFileAppender">
+        <file>/data/logs/${APP_NAME}.log</file>
+        <rollingPolicy class="ch.qos.logback.core.rolling.SizeAndTimeBasedRollingPolicy">
+            <fileNamePattern>/data/logs/${APP_NAME}.%d{yyyy-MM-dd}.%i.log.gz</fileNamePattern>
+            <maxFileSize>50MB</maxFileSize>
+            <maxHistory>30</maxHistory>
+            <totalSizeCap>5GB</totalSizeCap>
+        </rollingPolicy>
+        <encoder>
+            <pattern>%d{yyyy-MM-dd HH:mm:ss.SSS} [%thread] [%X{traceId:-}] %-5level ${APP_NAME} - %logger{36} - %msg%n</pattern>
+        </encoder>
+    </appender>
+
+    <!-- ============ Kafka Appender（可选，通过 spring.profiles.active=kafka-log 启用） ============ -->
+    <springProfile name="kafka-log">
+        <appender name="KAFKA" class="com.github.danielwegener.logback.kafka.KafkaAppender">
+            <encoder class="net.logstash.logback.encoder.LogstashEncoder">
+                <includeMdc>true</includeMdc>
+                <customFields>{"service":"${APP_NAME}"}</customFields>
+            </encoder>
+            <topic>app-logs</topic>
+            <keyingStrategy class="com.github.danielwegener.logback.kafka.keying.HostNameKeyingStrategy"/>
+            <deliveryStrategy class="com.github.danielwegener.logback.kafka.delivery.AsynchronousDeliveryStrategy"/>
+            <producerConfig>bootstrap.servers=${KAFKA_BOOTSTRAP_SERVERS:-192.168.31.105:9092}</producerConfig>
+            <producerConfig>acks=1</producerConfig>
+            <producerConfig>linger.ms=100</producerConfig>
+            <producerConfig>max.block.ms=5000</producerConfig>
+        </appender>
+
+        <root level="INFO">
+            <appender-ref ref="KAFKA"/>
+        </root>
+    </springProfile>
+
+    <!-- ============ Root Logger ============ -->
+    <root level="INFO">
+        <appender-ref ref="CONSOLE"/>
+        <appender-ref ref="FILE"/>
+    </root>
+
+    <!-- 第三方库日志降级 -->
+    <logger name="org.springframework" level="WARN"/>
+    <logger name="org.apache" level="WARN"/>
+    <logger name="com.netflix" level="WARN"/>
+    <logger name="io.netty" level="WARN"/>
+    <logger name="com.zaxxer" level="WARN"/>
+</configuration>

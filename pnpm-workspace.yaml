@@ -1,0 +1,20 @@
+# MarsChat Components Monorepo
+# 统一管理所有公共组件库
+
+packages:
+  # 前端 npm 包
+  - 'packages/*'
+
+# 共享依赖版本
+catalogs:
+  default:
+    vue: ^3.4.21
+    element-plus: ^2.6.1
+    '@element-plus/icons-vue': ^2.3.1
+    axios: ^1.6.7
+    typescript: ^5.4.2
+    vite: ^5.1.6
+    '@vitejs/plugin-vue': ^5.0.4
+    vue-tsc: ^2.0.6
+    pinia: ^2.1.7
+    '@vueuse/core': ^10.9.0
