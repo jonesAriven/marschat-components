@@ -22,7 +22,7 @@
       <el-form-item prop="username">
         <el-input
           v-model="form.username"
-          placeholder="用户名"
+          :placeholder="labels.usernamePlaceholder"
           :prefix-icon="User"
         />
       </el-form-item>
@@ -30,7 +30,7 @@
         <el-input
           v-model="form.password"
           type="password"
-          placeholder="密码"
+          :placeholder="labels.passwordPlaceholder"
           :prefix-icon="Lock"
           show-password
         />
@@ -44,7 +44,7 @@
           target="_blank"
           rel="noopener"
         >
-          忘记密码？
+          {{ labels.forgotPasswordText }}
         </a>
       </div>
 
@@ -55,14 +55,14 @@
           class="login-btn"
           @click="handleLogin"
         >
-          登 录
+          {{ labels.loginButtonText }}
         </el-button>
-      </el-form>
+      </el-form-item>
     </el-form>
 
     <!-- SSO 分隔线与按钮 -->
     <template v-if="config.showSso !== false && config.ssoConfig">
-      <el-divider content-position="center">或</el-divider>
+      <el-divider content-position="center">{{ labels.dividerText }}</el-divider>
       <el-button
         type="success"
         class="sso-btn"
@@ -70,7 +70,7 @@
         @click="handleSsoLogin"
       >
         <el-icon><Connection /></el-icon>
-        统一认证登录 (SSO)
+        {{ labels.ssoButtonText }}
       </el-button>
     </template>
 
@@ -80,11 +80,11 @@
 </template>
 
 <script setup lang="ts">
-import { ref, reactive } from 'vue'
+import { ref, reactive, computed } from 'vue'
 import type { FormInstance, FormRules } from 'element-plus'
 import { ElMessage } from 'element-plus'
 import { User, Lock, Connection } from '@element-plus/icons-vue'
-import type { LoginPanelConfig } from '../types'
+import type { LoginPanelConfig, LoginPanelLabels } from '../types'
 import { startSsoLogin } from '../utils/sso'
 
 const props = defineProps<{
@@ -95,6 +95,26 @@ const emit = defineEmits<{
   (e: 'login', credentials: { username: string; password: string }): void
   (e: 'sso-login'): void
 }>()
+
+/** 默认文案 */
+const defaultLabels: Required<LoginPanelLabels> = {
+  usernamePlaceholder: '用户名',
+  passwordPlaceholder: '密码',
+  loginButtonText: '登 录',
+  ssoButtonText: '统一认证登录 (SSO)',
+  forgotPasswordText: '忘记密码？',
+  dividerText: '或',
+  successMessage: '登录成功',
+  loginFailedMessage: '登录失败，请检查用户名或密码',
+  ssoNotConfiguredMessage: 'SSO 未配置',
+  ssoFailedMessage: 'SSO 登录发起失败',
+}
+
+/** 合并默认文案和自定义文案 */
+const labels = computed<Required<LoginPanelLabels>>(() => ({
+  ...defaultLabels,
+  ...props.config.labels,
+}))
 
 const formRef = ref<FormInstance>()
 const loading = ref(false)
@@ -123,9 +143,9 @@ async function handleLogin() {
       await props.config.onLogin({ username: form.username, password: form.password })
     }
     emit('login', { username: form.username, password: form.password })
-    ElMessage.success('登录成功')
+    ElMessage.success(labels.value.successMessage)
   } catch (e: any) {
-    error.value = e?.message || '登录失败，请检查用户名或密码'
+    error.value = e?.message || labels.value.loginFailedMessage
   } finally {
     loading.value = false
   }
@@ -133,7 +153,7 @@ async function handleLogin() {
 
 async function handleSsoLogin() {
   if (!props.config.ssoConfig) {
-    error.value = 'SSO 未配置'
+    error.value = labels.value.ssoNotConfiguredMessage
     return
   }
 
@@ -149,7 +169,7 @@ async function handleSsoLogin() {
     }
     emit('sso-login')
   } catch (e: any) {
-    error.value = e?.message || 'SSO 登录发起失败'
+    error.value = e?.message || labels.value.ssoFailedMessage
     ssoLoading.value = false
   }
 }
