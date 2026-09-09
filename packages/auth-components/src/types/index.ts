@@ -77,6 +77,8 @@ export interface LoginPanelConfig {
   showForgotPassword?: boolean
   /** SSO 配置 */
   ssoConfig?: SsoConfig
+  /** 自定义文案（可覆盖所有默认文案） */
+  labels?: LoginPanelLabels
   /** 独立登录回调 */
   onLogin?: (credentials: { username: string; password: string }) => Promise<void>
   /** SSO 登录回调（可选，默认使用内置逻辑） */
@@ -148,4 +150,16 @@ export interface AuthState {
   loading: boolean
   /** 错误信息 */
   error: string | null
+}
+
+/** useAuth 组合式函数选项 */
+export interface UseAuthOptions {
+  /** SSO 配置（可选，不配置则禁用 SSO 功能） */
+  ssoConfig?: SsoConfig
+  /** 登录 API 函数 */
+  loginApi?: (username: string, password: string) => Promise<any>
+  /** 登录成功后的处理 */
+  onLoginSuccess?: (data: any) => void
+  /** 登出后的跳转路径 */
+  logoutRedirect?: string
 }

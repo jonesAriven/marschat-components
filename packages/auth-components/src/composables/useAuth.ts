@@ -8,18 +8,7 @@ import type { SsoConfig, AuthState, UseAuthOptions } from '../types'
 import { getToken, setToken, getRefreshToken, setRefreshToken, clearTokens, getTokenKind, setTokenKind, decodeOidcClaims } from '../utils/token'
 import { refreshOidcToken } from '../utils/sso'
 
-export interface UseAuthOptions {
-  /** SSO 配置（可选，不配置则禁用 SSO 功能） */
-  ssoConfig?: SsoConfig
-  /** 登录 API 函数 */
-  loginApi?: (username: string, password: string) => Promise<any>
-  /** 登录成功后的处理 */
-  onLoginSuccess?: (data: any) => void
-  /** 登出后的跳转路径 */
-  logoutRedirect?: string
-}
-
-export function useAuth(options: UseAuthOptions = {}) {
+export function useAuth(options: UseAuth = {}) {
   const loading = ref(false)
   const error = ref<string | null>(null)
   const user = ref<{ username?: string; [key: string]: any }>({})

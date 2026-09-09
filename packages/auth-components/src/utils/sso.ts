@@ -5,7 +5,7 @@
 
 import type { SsoConfig, OidcTokenResponse } from '../types'
 import { generateVerifier, generateChallenge, generateState, base64UrlEncode } from './pkce'
-import { setToken, setRefreshToken, setTokenKind } from './token'
+import { setToken, setRefreshToken, getToken, getRefreshToken, setTokenKind } from './token'
 
 // Session Storage keys
 const SESSION_KEYS = {

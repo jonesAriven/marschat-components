@@ -6,7 +6,7 @@
 import { ref, computed } from 'vue'
 import type { SsoConfig, AuthState } from '../types'
 import { startSsoLogin, handleSsoCallback, refreshOidcToken, buildSsoAuthorizeUrl } from '../utils/sso'
-import { isOidcToken, clearTokens, getTokenKind, decodeOidcClaims } from '../utils/token'
+import { isOidcToken, clearTokens, getTokenKind, decodeOidcClaims, getToken } from '../utils/token'
 
 export function useSso(config: SsoConfig) {
   const loading = ref(false)

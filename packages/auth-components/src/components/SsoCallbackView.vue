@@ -13,7 +13,6 @@
 
 <script setup lang="ts">
 import { onMounted, ref } from 'vue'
-import { useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
 import { Loading } from '@element-plus/icons-vue'
 import type { SsoConfig } from '../types'
@@ -37,8 +36,15 @@ const emit = defineEmits<{
   (e: 'error', error: Error): void
 }>()
 
-const router = useRouter()
 const error = ref<string | null>(null)
+
+/**
+ * 导航到指定路径
+ * 不依赖 vue-router，使用原生 location API
+ */
+function navigateTo(path: string) {
+  window.location.href = path
+}
 
 onMounted(async () => {
   try {
@@ -63,8 +69,8 @@ onMounted(async () => {
     }
     emit('success', redirect)
     
-    // 默认行为：跳转到目标页面
-    router.push(redirect)
+    // 默认行为：跳转到目标页面（使用原生导航）
+    navigateTo(redirect)
   } catch (e: any) {
     error.value = e?.message || 'SSO 登录失败'
     
@@ -75,7 +81,7 @@ onMounted(async () => {
     
     // 3秒后自动跳转回登录页
     setTimeout(() => {
-      router.push('/login')
+      navigateTo('/login')
     }, 3000)
   }
 })
