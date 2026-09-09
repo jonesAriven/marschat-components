@@ -15,7 +15,7 @@ export interface ErrorInterceptorOptions {
 /**
  * 创建错误拦截器配置
  */
-export function createErrorInterceptor(options: ErrorInterceptorOptions = {}) => {
+export function createErrorInterceptor(options: ErrorInterceptorOptions = {}) {
   const { showDetail = true, useElMessage = true, onError } = options
 
   return {

@@ -9,12 +9,14 @@ export default defineConfig({
       entry: resolve(__dirname, 'src/index.ts'),
       name: 'MarsChatAuthComponents',
       formats: ['es', 'umd'],
+      fileName: (format) => format === 'es' ? 'marschat-auth-components.es.js' : 'marschat-auth-components.umd.cjs',
     },
     rollupOptions: {
-      external: ['vue', 'element-plus'],
+      external: ['vue', 'element-plus', 'element-plus/icons-vue'],
       output: {
         globals: {
           vue: 'Vue',
+          'element-plus': 'elementPlus',
         },
       },
     },

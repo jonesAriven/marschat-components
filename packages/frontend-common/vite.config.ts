@@ -9,8 +9,10 @@ export default defineConfig({
       entry: resolve(__dirname, 'src/index.ts'),
       name: 'MarschatFrontendCommon',
       formats: ['es', 'umd'],
+      fileName: (format) => format === 'es' ? 'marschat-frontend-common.es.js' : 'marschat-frontend-common.umd.cjs',
     },
-    rollupOptions:      external: ['vue', 'element-plus', 'axios', '@vueuse/core'],
+    rollupOptions: {
+      external: ['vue', 'element-plus', 'axios', '@vueuse/core'],
       output: { globals: { vue: 'Vue' } },
     },
   },

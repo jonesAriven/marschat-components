@@ -4,9 +4,9 @@
  */
 
 import { ref, computed, reactive } from 'vue'
-import type { PaginatedResponse, PaginationParams } from '../types/pagination'
+import type { PaginationParams } from '../types/pagination'
 
-export interface PaginationOptions<T = {
+export interface PaginationOptions<T = any> {
   /** 获取分页数据的 API 函数 */
   fetchFn: (params: PaginationParams) => Promise<PaginatedResponse<T>>
   /** 每页条数，默认 20 */
@@ -15,7 +15,7 @@ export interface PaginationOptions<T = {
   immediate?: boolean
 }
 
-export function usePagination<T = (options: PaginationOptions<T>) => {
+export function usePagination<T = any>(options: PaginationOptions<T>) {
   const loading = ref(false)
   const error = ref<string | null>(null)
   const currentPage = ref(1)
@@ -24,12 +24,11 @@ export function usePagination<T = (options: PaginationOptions<T>) => {
   const records = ref<T[]>([])
 
   // 数据
-  const paginatedData = computed<PaginatedResponse<T>>(() => ({
-    records: records.value,
+  const paginatedData = computed(() => ({
+    list: records.value,
     total: total.value,
-    size: pageSize.value,
-    current: currentPage.value,
-    pages: Math.ceil(total.value / pageSize.value),
+    page: currentPage.value,
+    pageSize: pageSize.value,
   }))
 
   /** 加载指定页 */
@@ -40,11 +39,11 @@ export function usePagination<T = (options: PaginationOptions<T>) => {
     try {
       const params: PaginationParams = {
         page,
-        size: size || pageSize.value,
+        pageSize: size || pageSize.value,
       }
       const data = await options.fetchFn(params)
       
-      records.value = data.records || []
+      records.value = data.list || []
       total.value = data.total || 0
       currentPage.value = page
       return data
@@ -63,7 +62,8 @@ export function usePagination<T = (options: PaginationOptions<T>) => {
 
   /** 下一页 */
   function nextPage() {
-    if (currentPage.value < paginatedData.value.pages) {
+    const totalPages = Math.ceil(total.value / pageSize.value)
+    if (currentPage.value < totalPages) {
       loadPage(currentPage.value + 1)
     }
   }
@@ -77,7 +77,8 @@ export function usePagination<T = (options: PaginationOptions<T>) => {
 
   /** 首页/末页 */
   function goToPage(page: number) {
-    if (page >= 1 && page <= paginatedData.value.pages) {
+    const totalPages = Math.ceil(total.value / pageSize.value)
+    if (page >= 1 && page <= totalPages) {
       loadPage(page)
     }
   }

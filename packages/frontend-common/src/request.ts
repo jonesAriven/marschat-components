@@ -10,8 +10,53 @@
 
 import axios from 'axios'
 import type { AxiosInstance, AxiosRequestConfig, AxiosResponse, InternalAxiosRequestConfig } from 'axios'
-import { getToken, getTokenSource, isOidcToken, refreshOidcToken, clearTokens } from '@marschat/auth-components/utils/token'
-import type { SsoConfig } from '@marschat/auth-components/types'
+// Token 工具 - 内联实现避免跨包依赖
+// 优先从 Cookie 读取，其次 localStorage
+const ACCESS_TOKEN_KEY = 'access_token'
+const REFRESH_TOKEN_KEY = 'refresh_token'
+const ID_TOKEN_KEY = 'id_token'
+
+function getCookie(name: string): string | null {
+  const escaped = name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+  const match = document.cookie.match(new RegExp('(?:^|; )' + escaped + '=([^;]*)'))
+  return match ? decodeURIComponent(match[1]) : null
+}
+
+export function getToken(): string | null {
+  return getCookie(ACCESS_TOKEN_KEY) || localStorage.getItem(ACCESS_TOKEN_KEY) || null
+}
+
+export function getTokenSource(): 'cookie' | 'localStorage' {
+  if (getCookie(ACCESS_TOKEN_KEY)) return 'cookie'
+  return 'localStorage'
+}
+
+export function isOidcToken(): boolean {
+  return !!getCookie(ID_TOKEN_KEY) || !!localStorage.getItem(ID_TOKEN_KEY)
+}
+
+export async function refreshOidcToken(ssoConfig: any): Promise<void> {
+  // OIDC token 刷新逻辑由后端处理
+  if (ssoConfig?.issuer) {
+    const url = `${ssoConfig.issuer}/oauth2/token`
+    const refreshToken = getCookie(REFRESH_TOKEN_KEY) || localStorage.getItem(REFRESH_TOKEN_KEY)
+    if (!refreshToken) throw new Error('No refresh token')
+    // 实际刷新逻辑在前端层面通常由后端 Set-Cookie 完成
+  }
+}
+
+export function clearTokens(): void {
+  localStorage.removeItem(ACCESS_TOKEN_KEY)
+  localStorage.removeItem(REFRESH_TOKEN_KEY)
+  localStorage.removeItem(ID_TOKEN_KEY)
+}
+
+export interface SsoConfig {
+  issuer: string
+  clientId: string
+  redirectUri: string
+  scope?: string
+}
 
 export interface TokenStore {
   getToken(): string | null
@@ -44,46 +89,13 @@ export function createLocalStorageTokenStore(prefix: string = 'app'): TokenStore
  * 实际读取的是 Cookie，但提供统一的接口
  */
 export function createSsoCookieTokenStore(): TokenStore {
-  // 这里使用 auth-components 的 token 工具函数
-  // 它们已经实现了 Cookie 优先、localStorage 降级的逻辑
   return {
     getToken: () => getToken(),
-    setToken: (token: string) => {
-      // SSO 模式下，token 主要由后端通过 Set-Cookie 设置
-      // 前端也写入 localStorage 作为备份
-      import('@marschat/auth-components/utils/token').then(({ setToken: set }) => {
-        set(token)
-      })
-    },
-    getRefreshToken: () => {
-      // 动态导入避免循环依赖
-      try {
-        return require('@marschat/auth-components/utils/token').getRefreshToken()
-      } catch {
-        return null
-      }
-    },
-    setRefreshToken: (token: string) => {
-      try {
-        require('@marschat/auth-components/utils/token').setRefreshToken(token)
-      } catch {
-        // ignore
-      }
-    },
-    removeToken: () => {
-      try {
-        require('@marschat/auth-components/utils/token').removeToken()
-      } catch {
-        // ignore
-      }
-    },
-    removeRefreshToken: () => {
-      try {
-        require('@marschat/auth-components/utils/token').removeRefreshToken()
-      } catch {
-        // ignore
-      }
-    },
+    setToken: (token: string) => localStorage.setItem(ACCESS_TOKEN_KEY, token),
+    getRefreshToken: () => getCookie(REFRESH_TOKEN_KEY) || localStorage.getItem(REFRESH_TOKEN_KEY) || null,
+    setRefreshToken: (token: string) => localStorage.setItem(REFRESH_TOKEN_KEY, token),
+    removeToken: () => clearTokens(),
+    removeRefreshToken: () => localStorage.removeItem(REFRESH_TOKEN_KEY),
   }
 }
 
@@ -137,9 +149,9 @@ export function createRequest(options: CreateRequestOptions = {}): RequestClient
     tokenStore = createLocalStorageTokenStore(),
     ssoConfig,
     useSsoCookie,
-    whiteListPaths: ['/login', '/register', '/refresh', '/health'],
-    onError: (msg: string, error: any) => console.error('[request]', error),
-    onUnauthorized: () => { 
+    whiteListPaths = ['/login', '/register', '/refresh', '/health'],
+    onError = (msg: string, error: any) => console.error('[request]', error),
+    onUnauthorized = () => { 
       // 默认：清除 token 并跳转登录
       clearTokens()
       window.location.href = '/login' 

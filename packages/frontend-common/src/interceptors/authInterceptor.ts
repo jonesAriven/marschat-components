@@ -7,8 +7,8 @@
  * - SSO 模式下不再手动设置 Authorization header（依赖 Cookie 自动携带）
  */
 
-import { isOidcToken, refreshOidcToken, clearTokens, getToken, getTokenSource } from '../utils/token'
-import type { SsoConfig } from '../types'
+import { isOidcToken, refreshOidcToken, clearTokens, getToken, getTokenSource } from '../request'
+import type { SsoConfig } from '../request'
 
 export interface AuthInterceptorOptions {
   /** SSO 配置（用于 OIDC token 刷新） */
