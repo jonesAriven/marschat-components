@@ -7,6 +7,7 @@
 
 // 组件
 export { default as LoginPanel } from './components/LoginPanel.vue'
+export { default as LoginPage } from './components/LoginPage.vue'
 export { default as SsoCallbackView } from './components/SsoCallbackView.vue'
 
 // 组合式函数

@@ -91,6 +91,39 @@ export interface LoginPanelConfig {
   onResetPassword?: (data: ResetPasswordRequest) => Promise<void>
 }
 
+/** 品牌侧亮点条目 */
+export interface LoginBrandHighlight {
+  /** Element Plus 图标名（应用需全局注册图标） */
+  icon?: string
+  title: string
+  desc?: string
+}
+
+/** 品牌侧配置（LoginPage 左栏） */
+export interface LoginBrandConfig {
+  /** 品牌名，默认取 config.title */
+  name?: string
+  /** 品牌标语，默认取 config.subtitle */
+  tagline?: string
+  /** 亮点列表 */
+  highlights?: LoginBrandHighlight[]
+  /** 品牌区渐变色 [起始, 结束] */
+  gradient?: [string, string]
+}
+
+/**
+ * 整页登录配置（LoginPage 组件）
+ * 继承 LoginPanelConfig，应用只需传配置 + 监听事件
+ */
+export interface LoginPageConfig extends LoginPanelConfig {
+  /** 布局：split=左品牌右表单，centered=居中卡片，默认 split */
+  layout?: 'split' | 'centered'
+  /** 品牌侧配置 */
+  brand?: LoginBrandConfig
+  /** 品牌区底部文字 */
+  footerText?: string
+}
+
 /** 登录面板文案（可自定义） */
 export interface LoginPanelLabels {
   /** 用户名输入框占位符 */
