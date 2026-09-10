@@ -21,7 +21,7 @@
 
 ### 方式一：使用默认 API（推荐）
 
-如果应用通过 Nginx 反向代理到 auth-center，只需配置 `showForgotPassword: true`（默认）：
+组件内置的默认实现会调用 auth-center 的两个公开接口。**只需把 `authApiBase` 配成本应用域名下能到达 auth-center 的 nginx 前缀**即可：
 
 ```vue
 <template>
@@ -34,6 +34,9 @@ import { LoginPanel } from '@marschat/auth-components'
 const loginConfig = {
   title: '知识库管理系统',
   showForgotPassword: true, // 默认 true，可省略
+  // ★ 忘记密码 / 重置密码接口前缀（相对本应用 origin），默认 '/kb/api/auth'
+  //   必须与本应用域名的 nginx 路由前缀一致，各应用取值见文末「各应用接入清单」
+  authApiBase: '/kb/api/auth',
   showSso: true,
   ssoConfig: {
     issuer: 'https://auth.marschat.online',
@@ -54,48 +57,51 @@ const loginConfig = {
 </script>
 ```
 
+> 组件拼接规则：`${authApiBase}/forgot-password`（发送验证码）、`${authApiBase}/reset-password`（重置密码）。
+> `authApiBase` 可传相对路径（推荐，随页面 origin 走）或绝对 URL。
+
 ### 方式二：自定义 API 回调
 
-如果应用的忘记密码接口不是默认路径，可以自定义回调：
+如果应用的忘记密码接口不是默认路径，可以自定义回调。注意后端返回的是 `{code, message, data, traceId}` 信封，且**业务异常同样是 HTTP 200**：
 
 ```vue
 <script setup lang="ts">
 import { LoginPanel } from '@marschat/auth-components'
 import type { SendCodeResponse, ResetPasswordRequest } from '@marschat/auth-components'
 
+/** 通用：解析 Result 信封，业务失败抛错 */
+async function callApi(url: string, body: unknown) {
+  const res = await fetch(url, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+  })
+  if (!res.ok) throw new Error(`请求失败（HTTP ${res.status}）`)
+  const json = await res.json()
+  if (json?.code !== 200) throw new Error(json?.message || '操作失败')
+  return json
+}
+
 const loginConfig = {
   title: '知识库管理系统',
   showForgotPassword: true,
-  
+
   // 自定义发送验证码
   onSendCode: async (email: string): Promise<SendCodeResponse> => {
-    const res = await fetch('https://auth.marschat.online/api/auth/forgot-password/send-code', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ email }),
-    })
-    return res.json()
+    await callApi('/your-prefix/forgot-password', { email })
+    return { success: true, message: '验证码已发送', expiresIn: 60 }
   },
-  
+
   // 自定义验证验证码
-  onVerifyCode: async (email: string, code: string): Promise<boolean> => {
-    const res = await fetch('https://auth.marschat.online/api/auth/forgot-password/verify-code', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ email, code }),
-    })
-    const data = await res.json()
-    return data.valid === true
+  // ⚠️ auth-center 没有独立的验证码预校验端点，验证发生在 reset-password 内部。
+  //    如需自定义，请在此做本地格式校验（或自行新增后端端点），不要假装"已验证"。
+  onVerifyCode: async (_email: string, code: string): Promise<boolean> => {
+    return !!code
   },
-  
-  // 自定义重置密码
+
+  // 自定义重置密码（验证码是否正确以本步结果为准）
   onResetPassword: async (data: ResetPasswordRequest): Promise<void> => {
-    const res = await fetch('https://auth.marschat.online/api/auth/forgot-password/reset', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(data),
-    })
-    if (!res.ok) throw new Error('重置密码失败')
+    await callApi('/your-prefix/reset-password', data)
   },
 }
 </script>
@@ -136,47 +142,41 @@ const loginConfig = {
 
 ## 后端 API 要求
 
-auth-center 需要提供以下三个接口：
+auth-center 实际只提供**两个**公开接口（`auth-center/AuthController.java`，均 `permitAll`）。
+
+> ⚠️ **全局约定：业务异常同样返回 HTTP 200**，错误码在 body 的 `code` 字段。
+> 前端必须同时校验 `response.ok` 与 `body.code === 200`，只看 HTTP 状态码会把业务失败误判为成功。
 
 ### 1. 发送验证码
 
 ```
-POST /api/auth/forgot-password/send-code
+POST {authApiBase}/forgot-password
 Content-Type: application/json
 
 {
   "email": "user@example.com"
 }
 
-Response:
+Response（防枚举：邮箱不存在也返回 200，静默不发送）:
 {
-  "success": true,
-  "message": "验证码已发送",
-  "expiresIn": 60
+  "code": 200,
+  "message": "success",
+  "data": null,
+  "traceId": "..."
 }
 ```
 
-### 2. 验证验证码
+失败示例（60 秒内重发）：
 
 ```
-POST /api/auth/forgot-password/verify-code
-Content-Type: application/json
-
-{
-  "email": "user@example.com",
-  "code": "123456"
-}
-
-Response:
-{
-  "valid": true
-}
+HTTP 200
+{ "code": 400, "message": "验证码发送过于频繁，请 60 秒后再试", "data": null }
 ```
 
-### 3. 重置密码
+### 2. 重置密码（校验验证码 + 改密 + 踢下线）
 
 ```
-POST /api/auth/forgot-password/reset
+POST {authApiBase}/reset-password
 Content-Type: application/json
 
 {
@@ -187,10 +187,29 @@ Content-Type: application/json
 
 Response:
 {
-  "success": true,
-  "message": "密码重置成功"
+  "code": 200,
+  "message": "success",
+  "data": null,
+  "traceId": "..."
 }
 ```
+
+失败示例：`{"code":400,"message":"验证码错误或已过期"}` / `{"code":400,"message":"验证码错误"}`
+
+### 后端没有的接口（别再照着写）
+
+- ❌ `/forgot-password/send-code` —— 不存在，发送验证码就是 `/forgot-password`
+- ❌ `/forgot-password/verify-code` —— 不存在，验证码校验发生在 `/reset-password` 内部
+- ❌ `/forgot-password/reset` —— 不存在，正确路径是 `/reset-password`
+
+### 验证码存储与限流（Redis，供排障参考）
+
+| 键 | 含义 | TTL |
+|---|---|---|
+| `auth:mail:code:RESET_PASSWORD:{email}` | 6 位验证码（一次性，验证成功即删） | 5 分钟 |
+| `auth:mail:ratelimit:RESET_PASSWORD:{email}` | 60 秒发送限频标记 | 60 秒 |
+| `auth:mail:fail:RESET_PASSWORD:{email}` | 连续错误计数（≥5 次触发锁定） | 15 分钟 |
+| `auth:mail:lock:RESET_PASSWORD:{email}` | 锁定标记 | 15 分钟 |
 
 ## 安全注意事项
 
@@ -209,6 +228,8 @@ Response:
 <!-- 旧版：跳转到独立页面 -->
 <a href="https://auth.marschat.online/forgot-password.html">忘记密码？</a>
 ```
+> ⚠️ `https://auth.marschat.online/forgot-password.html` **这个页面从未部署过**（auth 域 nginx 白名单只放行 OIDC 端点，其余一律 404）。
+> `myfrp/frontend/src/views/Login.vue` 里仍残留该链接，点击必 404，需改为组件内流程。
 
 **新方式（✅ 推荐）：**
 ```vue
@@ -216,16 +237,20 @@ Response:
 <LoginPanel :config="{ showForgotPassword: true }" />
 ```
 
-### 各应用更新清单
+### 各应用接入清单
 
-| 应用 | 操作 |
-|------|------|
-| activecode | 升级 @marschat/auth-components 到最新版本 |
-| kb-web | 升级 + 配置 onSendCode/onVerifyCode/onResetPassword（如需要） |
-| cosmic-studio | 同上 |
-| kb-ops | 同上 |
-| infra-monitor | 同上 |
-| portal | 同上 |
+组件版本统一 ≥ **0.3.3**（0.3.2 及以前的默认实现 URL 与后端契约不匹配，必 404）。
+
+| 应用 | 页面 origin | `authApiBase` | nginx 路由来源 |
+|------|-------------|---------------|----------------|
+| kb-web | `kb.marschat.online` | `/kb/api/auth` | mykng `locations/kb.conf`（→ kb-gateway） |
+| kb-ops-web | `main.` / `kb.marschat.online` | `/ops/auth-api` | mykng `locations/ops.conf`（→ kb-gateway） |
+| infra-monitor-web | `monitor.marschat.online` | `/kb/api/auth` | monitor 域 catch-all → mykng |
+| portal | `main.marschat.online` | `/portal/auth-api` | main 域 + mykng `locations/portal.conf`（→ kb-gateway） |
+| cosmic-studio | 待确认 | 待确认 | ⚠️ 尚未接入，需按其域名补路由 |
+
+⚠️ **多域名应用注意**：`authApiBase` 是**相对本应用 origin** 解析的。
+若同一应用会被多个域名访问，必须保证每个域名的 nginx 都放行了该前缀，否则会出现「A 域名能用、B 域名 404」。
 
 ## 测试用例
 

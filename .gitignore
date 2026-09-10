@@ -53,3 +53,6 @@ temp/
 *.bak
 *.swp
 *~
+
+# vite 构建临时文件
+*.timestamp-*.mjs

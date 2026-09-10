@@ -1,6 +1,6 @@
 {
   "name": "@marschat/auth-components",
-  "version": "0.3.2",
+  "version": "0.3.3",
   "description": "MarsChat 统一认证公共组件库 - SSO 单点登录、独立登录、忘记密码、OIDC PKCE",
   "type": "module",
   "main": "./dist/marschat-auth-components.es.js",

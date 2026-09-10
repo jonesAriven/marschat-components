@@ -75,6 +75,18 @@ export interface LoginPanelConfig {
   showSso?: boolean
   /** 是否显示忘记密码链接，默认 true */
   showForgotPassword?: boolean
+  /**
+   * 认证接口基地址（相对或绝对 URL），默认 '/kb/api/auth'。
+   *
+   * 组件会拼接为 `${authApiBase}/forgot-password`（发送验证码）与
+   * `${authApiBase}/reset-password`（校验验证码并重置密码）。
+   * 各应用需按自己域名的 nginx 路由前缀覆盖，例如：
+   * - kb-web        → '/kb/api/auth'
+   * - kb-ops        → '/ops/auth-api'
+   * - portal        → '/portal/auth-api'
+   * - infra-monitor → '/kb/api/auth'
+   */
+  authApiBase?: string
   /** SSO 配置 */
   ssoConfig?: SsoConfig
   /** 自定义文案（可覆盖所有默认文案） */

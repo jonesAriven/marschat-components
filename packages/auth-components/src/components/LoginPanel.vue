@@ -526,45 +526,69 @@ function stopCountdown() {
 }
 
 // ========== 默认 API 调用（可被 onSendCode/onVerifyCode/onResetPassword 覆盖）==========
-async function defaultSendCode(email: string): Promise<SendCodeResponse> {
-  const response = await fetch('/api/auth/forgot-password/send-code', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ email }),
-  })
+/**
+ * 认证接口基地址默认值。各应用应通过 config.authApiBase 覆盖为自己域名下的 nginx 前缀。
+ */
+const DEFAULT_AUTH_API_BASE = '/kb/api/auth'
 
-  if (!response.ok) {
-    throw new Error(`HTTP ${response.status}: ${response.statusText}`)
-  }
-
-  return response.json()
+function authApiUrl(path: string): string {
+  const base = (props.config.authApiBase || DEFAULT_AUTH_API_BASE).replace(/\/+$/, '')
+  return `${base}${path}`
 }
 
-async function defaultVerifyCode(email: string, code: string): Promise<boolean> {
-  const response = await fetch('/api/auth/forgot-password/verify-code', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ email, code }),
-  })
-
-  if (!response.ok) {
-    throw new Error(`HTTP ${response.status}: ${response.statusText}`)
+/**
+ * 统一调用 auth-center 接口并解析 Result 信封：`{code, message, data, traceId}`。
+ *
+ * ⚠️ 本系统统一约定：**业务异常同样返回 HTTP 200**，真正的错误码在 `body.code`。
+ * 因此必须同时校验 `response.ok` 与 `body.code === 200`，只看 HTTP 状态码会把
+ * 「验证码错误」这类业务失败误判为成功。
+ */
+async function callAuthApi<T = unknown>(url: string, body: unknown): Promise<T> {
+  let response: Response
+  try {
+    response = await fetch(url, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    })
+  } catch {
+    throw new Error('网络异常，请稍后重试')
   }
 
-  const data = await response.json()
-  return data.valid === true
+  if (!response.ok) {
+    throw new Error(`请求失败（HTTP ${response.status}）`)
+  }
+
+  let payload: any
+  try {
+    payload = await response.json()
+  } catch {
+    throw new Error('服务响应格式异常')
+  }
+
+  if (payload && typeof payload.code === 'number' && payload.code !== 200) {
+    throw new Error(payload.message || '操作失败')
+  }
+
+  return (payload?.data ?? payload) as T
+}
+
+async function defaultSendCode(email: string): Promise<SendCodeResponse> {
+  await callAuthApi(authApiUrl('/forgot-password'), { email })
+  return { success: true, message: '验证码已发送', expiresIn: 60 }
+}
+
+/**
+ * 后端（auth-center）**没有独立的验证码预校验端点**，验证码的真实校验发生在
+ * `/reset-password` 内部。因此此处仅做本地放行，把验证码带到下一步；
+ * 验证码是否正确以最终「重置密码」的返回结果为准。
+ */
+async function defaultVerifyCode(_email: string, code: string): Promise<boolean> {
+  return !!code
 }
 
 async function defaultResetPassword(data: { email: string; code: string; newPassword: string }): Promise<void> {
-  const response = await fetch('/api/auth/forgot-password/reset', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(data),
-  })
-
-  if (!response.ok) {
-    throw new Error(`HTTP ${response.status}: ${response.statusText}`)
-  }
+  await callAuthApi(authApiUrl('/reset-password'), data)
 }
 
 // 暴露方法供外部调用
