@@ -354,10 +354,13 @@ async function handleLogin() {
 
   try {
     if (props.config.onLogin) {
+      // 组件托管模式：onLogin 成功才弹成功提示，失败走 catch
       await props.config.onLogin({ username: form.username, password: form.password })
+      ElMessage.success(labels.value.successMessage)
     }
+    // 事件模式：结果由应用自行处理（emit 无法等待，不能代弹成功提示，
+    // 否则应用侧登录失败时会出现「登录成功 + 登录失败」双 toast 的假象）
     emit('login', { username: form.username, password: form.password })
-    ElMessage.success(labels.value.successMessage)
   } catch (e: any) {
     error.value = e?.message || labels.value.loginFailedMessage
   } finally {
