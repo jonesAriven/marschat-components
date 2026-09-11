@@ -22,6 +22,8 @@ import {
   clearLocalAuth,
 } from './utils/sso'
 import { getToken, getIdToken, isOidcToken, decodeOidcClaims } from './utils/token'
+import { startSessionWatcher } from './utils/sessionWatcher'
+import type { SessionWatcher, SessionWatcherOptions } from './utils/sessionWatcher'
 import type { SsoConfig, SessionProbeResult, SloOptions, OidcClaims } from './types'
 
 /**
@@ -92,6 +94,27 @@ export function createSsoClient(config: SsoConfig) {
 
     /** 仅清本地凭据，不碰 IdP 会话 */
     clearLocalAuth: (): void => clearLocalAuth(),
+
+    /**
+     * 启动**会话监视**（Phase 6：单点登出跨应用联动）。
+     *
+     * SAS 不支持 back-channel logout，其他应用在别处登出后本地 token 不会失效。
+     * 监视线程会在「页面切回可见 / 窗口获焦 / 定时（默认 60s）」时探一次
+     * `/auth/session`，**确认**会话消失才清本地并跳登录页；探针失败一律保持现状。
+     *
+     * @returns 监视器句柄 —— **应用主动登出前必须 `.stop()`**，否则登出跳转途中
+     *          监视器可能再判定一次，造成多余的二次跳转。
+     *
+     * @example
+     * ```ts
+     * const watcher = sso.watchSession({ intervalMs: 60_000 })
+     * // 退出登录时：
+     * watcher.stop()
+     * sso.logout()
+     * ```
+     */
+    watchSession: (options?: SessionWatcherOptions): SessionWatcher =>
+      startSessionWatcher(config, options),
 
     // ---- token 便捷方法 ----
     getToken: (): string | null => getToken(),

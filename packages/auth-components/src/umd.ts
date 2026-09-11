@@ -51,6 +51,9 @@ import {
   isOidcToken,
   decodeOidcClaims,
 } from './utils/token'
+// Phase 6：会话监视（SLO 跨应用联动）+ 统一用户管理数据源（均为纯逻辑，无 Vue 依赖）
+import { createSessionWatcher, startSessionWatcher } from './utils/sessionWatcher'
+import { createUserAdminClient } from './utils/userAdmin'
 import type { SsoConfig, SessionProbeResult, SloOptions } from './types'
 
 /**
@@ -95,6 +98,10 @@ export {
   getTokenKind,
   isOidcToken,
   decodeOidcClaims,
+  // Phase 6：会话监视（SLO 跨应用联动）+ 统一用户管理数据源（activecode 静态页同样需要）
+  createSessionWatcher,
+  startSessionWatcher,
+  createUserAdminClient,
 }
 
 export type { SsoClient, SsoConfig, SessionProbeResult, SloOptions }

@@ -43,6 +43,18 @@ export interface SessionProbeResult {
   authenticated: boolean
   /** 已登录用户名（未登录为 null） */
   username?: string | null
+  /**
+   * 探针请求本身是否**成功执行**（HTTP 200 且响应可解析）——「可信度」标记。
+   *
+   * - `true`  → `authenticated` 可信，可以据此**主动登出**（会话确实没了）
+   * - `false` → 网络异常 / 超时 / 非 200 / 响应不可解析，`authenticated` 只是兜底值，
+   *             调用方（会话监视器）必须 **fail-safe 保持现状**，绝不能据此把用户踢出去。
+   *
+   * ★ 为什么必须区分：`probeIdpSession` 为保护登录页不自屏，异常时一律返回
+   *   `{authenticated:false}`。若会话监视器不区分「确认无会话」与「探针失败」，
+   *   auth-center 抖动一次就会把全平台在线用户集体登出 —— 这是比"登不掉"严重得多的事故。
+   */
+  ok?: boolean
 }
 
 /** 统一登出（SLO）选项 */

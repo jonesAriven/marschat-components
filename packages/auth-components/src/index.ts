@@ -9,6 +9,8 @@
 export { default as LoginPanel } from './components/LoginPanel.vue'
 export { default as LoginPage } from './components/LoginPage.vue'
 export { default as SsoCallbackView } from './components/SsoCallbackView.vue'
+// Phase 6：统一用户管理面板（一份实现，6 应用按 admin 权限挂载）
+export { default as UserManagementPanel } from './components/UserManagementPanel.vue'
 
 // 组合式函数
 export { useSso } from './composables/useSso'
@@ -47,6 +49,23 @@ export {
   clearLocalAuth,
 } from './utils/sso'
 export { generateVerifier, generateChallenge, generateState, base64UrlEncode } from './utils/pkce'
+
+// Phase 6：会话监视（单点登出跨应用联动）
+export { createSessionWatcher, startSessionWatcher } from './utils/sessionWatcher'
+export type { SessionWatcher, SessionWatcherOptions } from './utils/sessionWatcher'
+
+// Phase 6：统一用户管理数据源（直连 auth-center 或走应用 BFF 代理）
+export { createUserAdminClient, UserAdminError } from './utils/userAdmin'
+export type {
+  AdminUserItem,
+  UserPageQuery,
+  UserPageResult,
+  CreateUserPayload,
+  UpdateUserPayload,
+  UserAdminClient,
+  UserManagementConfig,
+  CreateUserAdminClientOptions,
+} from './utils/userAdmin'
 
 // 类型
 export type {

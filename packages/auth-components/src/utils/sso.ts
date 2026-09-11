@@ -225,16 +225,20 @@ export async function probeIdpSession(
       headers: { Accept: 'application/json' },
       signal: controller.signal,
     })
-    if (!res.ok) return { authenticated: false }
+    // 非 200：无法判定是「无会话」还是「服务端异常」→ ok=false（不可信）
+    if (!res.ok) return { authenticated: false, ok: false }
     const body: any = await res.json().catch(() => null)
     // 兼容 {code,data:{...}} 包裹 与 裸对象两种返回
     const payload = body && typeof body === 'object' && body.data ? body.data : body
     return {
       authenticated: !!payload?.authenticated,
       username: payload?.username ?? null,
+      // 只有解析出对象才算「探针成功执行」，此时 authenticated 才可用于主动登出判定
+      ok: payload != null,
     }
   } catch {
-    return { authenticated: false }
+    // 网络异常 / 超时 / 被 CORS 拦截 → 不可信
+    return { authenticated: false, ok: false }
   } finally {
     clearTimeout(timer)
   }
