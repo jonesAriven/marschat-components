@@ -145,6 +145,12 @@ public class GlobalExceptionHandler {
         return Result.fail(400, "参数校验失败").withTraceId(MDC.get("traceId"));
     }
 
+    // ⚠️ 有意不加 AccessDeniedException → 403 映射（2026-09-12 评估后否决）：
+    // 该 handler 需要方法签名引用 spring-security-core 的类，而 common-core 无此依赖；
+    // 强引会给没有 security classpath 的下游服务带来 NoClassDefFoundError 风险。
+    // 全平台 @PreAuthorize 目前只有 auth-center 在用，已由其本地 AccessDeniedAdvice 精确映射 403；
+    // 未来第二个服务需要方法级授权时，照抄该 advice（3 行）而非动枢纽库。
+
     @ExceptionHandler(Exception.class)
     @ResponseStatus(HttpStatus.INTERNAL_SERVER_ERROR)
     public Result<?> handleUnknown(Exception e, HttpServletRequest req) {
