@@ -64,6 +64,23 @@ export interface SessionWatcherOptions {
    * 会自动带上 `?slo=1` 标记，便于登录页区分「被联动登出」与「主动访问」。
    */
   loginUrl?: string
+  /**
+   * 自定义「本地是否还持有凭据」判定。默认读组件库配置的 `accessTokenKey`。
+   *
+   * ★ 为什么必须可注入：**自管 token 的应用**（凭据存在自己的键上，例如 portal 的
+   *   `portal_token`、cosmic-studio 的 `token`）若沿用默认实现，`getToken()` 读不到值 →
+   *   `tick()` 在首行 `if (!readToken()) return false` **直接短路 → 永不探针 → SLO 联动静默失效**。
+   *   （2026-09-12 实测：cosmic 的 bundle 里含监视器代码，但运行期 **0 次** `/auth/session` 探针，
+   *     根因即此。）
+   */
+  getToken?: () => string | null | undefined
+  /**
+   * 失去会话时清理本地凭据。默认清组件库的 token 键 + `auth_user`。
+   *
+   * ★ 自管 token 的应用**必须**传入自己的清理函数，否则会「清掉组件库的键、留下自己的键」——
+   *   本地凭据没清干净，下次静默免登又会把人登回去。
+   */
+  clearLocalAuth?: () => void
 }
 
 /** 会话监视器句柄 */
@@ -123,6 +140,15 @@ export function createSessionWatcher(
   const opts = { ...DEFAULTS, ...options }
   const loginUrl = options.loginUrl || config.loginUrl || '/login'
 
+  /**
+   * 凭据读取 / 清理 —— 可被应用覆盖（见 `SessionWatcherOptions.getToken` / `clearLocalAuth`）。
+   *
+   * ⚠️ 默认实现只认**组件库自己的 token 键**；自管 token 的应用必须注入，否则 `readToken()`
+   *    恒为假 → 监视器永不探针（这正是 cosmic-studio SLO 失效的根因）。
+   */
+  const readToken = options.getToken ?? getToken
+  const clearAuth = options.clearLocalAuth ?? clearLocalAuthSafely
+
   let running = false
   let paused = false
   let timer: ReturnType<typeof setInterval> | null = null
@@ -134,7 +160,7 @@ export function createSessionWatcher(
   async function tick(): Promise<boolean> {
     if (!running || paused || probing) return true
     // 本地没有 token 时无需探针（未登录状态，探针无意义且浪费请求）
-    if (!getToken()) {
+    if (!readToken()) {
       return false
     }
     probing = true
@@ -164,7 +190,7 @@ export function createSessionWatcher(
       const username = probe.username ?? null
       // 先停表，避免跳转过程中再次触发
       stopWatcher()
-      clearLocalAuthSafely()
+      clearAuth()
       opts.onSessionLost?.({ username, reason: 'probe' })
 
       if (opts.redirectOnLost && !isOnLoginPage(loginUrl)) {
