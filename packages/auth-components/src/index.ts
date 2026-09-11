@@ -22,6 +22,7 @@ export {
   removeToken,
   getRefreshToken,
   setRefreshToken,
+  removeRefreshToken,
   getIdToken,
   setIdToken,
   removeIdToken,
