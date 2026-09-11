@@ -299,10 +299,28 @@ export function ssoLogout(config: SsoConfig, options: SloOptions = {}): void {
  * 静默续期（方案 A）：public client 拿不到 refresh_token，
  * 改为「悄悄重跑一次授权」——IdP 会话在则秒回新 code，用户无感。
  *
+ * 默认落地路径 = 当前页。⚠️ 必须剥离**部署前缀**（如 kb-web 的 `/kb`）：
+ * 回调页是用 router.replace(target) 落地的，router 自带 base 会再拼一次前缀，
+ * 不剥就会落到 `/kb/kb/users` 这类重复路径（2026-09-12 实测）。
+ * 前缀从 config.redirectUri 推导（去掉末段 callback 路径），应用显式传
+ * 应用内 path 时不受影响。
+ *
  * @returns 同样不会返回（已导航离开）
  */
 export async function renewByReauthorize(config: SsoConfig, redirect?: string): Promise<never> {
-  const target = redirect || `${window.location.pathname}${window.location.search}`
+  const current = `${window.location.pathname}${window.location.search}`
+  let target = redirect || current
+  if (!redirect) {
+    try {
+      const cbPath = new URL(config.redirectUri, window.location.origin).pathname
+      const base = cbPath.replace(/\/[^/]*$/, '')
+      if (base && current.startsWith(base)) {
+        target = current.slice(base.length) || '/'
+      }
+    } catch {
+      /* redirectUri 非法时保持原样 */
+    }
+  }
   clearTokens()
   await startSsoLogin(config, target)
   return new Promise<never>(() => {})
