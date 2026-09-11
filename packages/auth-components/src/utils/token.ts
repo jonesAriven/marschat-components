@@ -36,6 +36,17 @@ const DEFAULT_CONFIG = {
  * 2. 非 SSO 模式的跨域 token 共享（安全性较低）
  */
 const COOKIE_CONFIG = {
+  /**
+   * ★ 是否允许**前端 JS 写 Cookie**。默认 `false`（2026-09-11 起）。
+   *
+   * 为什么默认关：`sso_access_token` / `sso_refresh_token` 是 **auth-center 后端写的 HttpOnly Cookie**
+   * （Domain=marschat.online）。前端若也往 `Domain=.marschat.online` 写同名 Cookie，浏览器会
+   * **同时存在两份同名 Cookie**，后端读取时可能拿到前端那份（非 HttpOnly、可被 XSS 偷），
+   * 且两份的过期时间/内容可能不一致 —— 属于"自己给自己埋雷"。
+   *
+   * 因此默认只写 localStorage；确有"非 SSO 模式跨域调试"需求时，由应用显式 `initTokenConfig({ cookie: { enabled: true } })` 打开。
+   */
+  enabled: false,
   /** SSO Access Token Cookie 名称（与后端一致） */
   accessTokenName: 'sso_access_token',
   /** SSO Refresh Token Cookie 名称 */
@@ -77,6 +88,8 @@ export interface InitTokenConfigOptions {
   tokenKindKey?: string
   idTokenKey?: string
   cookie?: {
+    /** 是否允许前端 JS 写 Cookie，默认 false（见 COOKIE_CONFIG.enabled 说明） */
+    enabled?: boolean
     domain?: string
     path?: string
     secure?: boolean
@@ -163,11 +176,11 @@ export function getToken(): string | null {
  * 前端设置的 Cookie 仅用于开发/降级场景
  */
 export function setToken(token: string): void {
-  // 始终写入 localStorage 作为备份
+  // 始终写入 localStorage（主存储）
   localStorage.setItem(config.accessTokenKey, token)
-  
-  // 尝试写入 Cookie（用于 SSO 跨域共享）
-  // 注意：此 Cookie 非 HttpOnly，生产环境应依赖后端设置
+
+  // Cookie 写入是**可选**的（默认关闭，见 COOKIE_CONFIG.enabled 的说明）
+  if (!COOKIE_CONFIG.enabled) return
   try {
     setCookie(COOKIE_CONFIG.accessTokenName, token)
   } catch (e) {
@@ -179,7 +192,9 @@ export function setToken(token: string): void {
  * 移除 Access Token
  */
 export function removeToken(): void {
-  deleteCookie(COOKIE_CONFIG.accessTokenName)
+  if (COOKIE_CONFIG.enabled) {
+    deleteCookie(COOKIE_CONFIG.accessTokenName)
+  }
   localStorage.removeItem(config.accessTokenKey)
 }
 
@@ -197,6 +212,7 @@ export function getRefreshToken(): string | null {
  */
 export function setRefreshToken(token: string): void {
   localStorage.setItem(config.refreshTokenKey, token)
+  if (!COOKIE_CONFIG.enabled) return
   try {
     setCookie(COOKIE_CONFIG.refreshTokenName, token)
   } catch (e) {
@@ -208,7 +224,9 @@ export function setRefreshToken(token: string): void {
  * 移除 Refresh Token
  */
 export function removeRefreshToken(): void {
-  deleteCookie(COOKIE_CONFIG.refreshTokenName)
+  if (COOKIE_CONFIG.enabled) {
+    deleteCookie(COOKIE_CONFIG.refreshTokenName)
+  }
   localStorage.removeItem(config.refreshTokenKey)
 }
 

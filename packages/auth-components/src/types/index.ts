@@ -71,6 +71,13 @@ export interface OidcTokenResponse {
 /** JWT Claims */
 export interface OidcClaims {
   sub?: string
+  /**
+   * 用户主键 id。
+   *
+   * ⚠️ 这是 auth-center 实际签发**独有**的 claim（实测 access_token payload：`sub=1, uid=1, role=admin, realm=kb, username=admin`）。
+   * 各应用免 `/auth/me` 直接建会话时用的就是它，所以必须进类型 —— 否则下游只能用 `as any` 绕。
+   */
+  uid?: string | number
   username?: string
   preferred_username?: string
   unique_name?: string
