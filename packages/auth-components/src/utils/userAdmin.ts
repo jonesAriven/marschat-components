@@ -107,6 +107,13 @@ export interface CreateUserAdminClientOptions {
    * 该 token 会被放进 `Authorization: Bearer <token>`。
    */
   getToken?: () => string | null
+  /**
+   * 401（登录已过期）时的回调，由应用注入「静默重授权」：
+   * 直连应用传 `() => renewByReauthorize()`（renew 默认回当前页），
+   * BFF 应用传跳自家 authorize 端点。回调触发后面板提示「正在重新登录」，
+   * 跳转回来后 `onMounted(load)` 自然重载列表。未注入时维持旧行为（仅 toast）。
+   */
+  onUnauthorized?: () => void
   /** 自定义 fetch（便于测试注入或复用应用已配置的实例） */
   fetchImpl?: typeof fetch
   /** 单请求超时（毫秒），默认 15000 */
@@ -173,6 +180,15 @@ export function createUserAdminClient(options: CreateUserAdminClientOptions): Us
     }
 
     if (res.status === 401 || res.status === 403) {
+      if (res.status === 401 && options.onUnauthorized) {
+        // 401 = 本地 token 失效但 IdP 会话可能仍在：交给应用做静默重授权，
+        // 跳转回来后页面重新挂载自然重载。先标记再抛，让面板把提示从 error 降为 warning。
+        try {
+          options.onUnauthorized()
+        } catch {
+          /* 注入的回调异常不掩盖原始 401 */
+        }
+      }
       throw new UserAdminError(
         res.status === 401 ? '登录已过期，请重新登录' : '当前账号无权限管理用户',
         res.status

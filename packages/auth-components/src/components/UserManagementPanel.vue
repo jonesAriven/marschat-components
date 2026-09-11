@@ -199,7 +199,12 @@ async function load(): Promise<void> {
     rows.value = res.list
     total.value = res.total
   } catch (e) {
-    ElMessage.error(errMsg(e))
+    if (e instanceof UserAdminError && e.status === 401) {
+      // client 注入了 onUnauthorized 时正在跳静默重授权；未注入时也按「会话过期」提示而非报错
+      ElMessage.warning('登录状态已过期，正在重新登录…')
+    } else {
+      ElMessage.error(errMsg(e))
+    }
   } finally {
     loading.value = false
   }
