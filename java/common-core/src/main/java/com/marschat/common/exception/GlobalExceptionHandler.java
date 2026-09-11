@@ -39,6 +39,22 @@ public class GlobalExceptionHandler {
         return Result.fail(400, "参数校验失败: " + msg).withTraceId(MDC.get("traceId"));
     }
 
+    /**
+     * 资源/路由不存在 → 404（而不是落到下面的 Exception 兜底变 500）。
+     * <p>
+     * Spring Boot 3.2 起 MVC 对「无匹配 handler」抛 {@code NoResourceFoundException}，
+     * 若不加本映射会被 {@link #handleUnknown} 捕获并返回 500 + 错误日志，
+     * 把「URL 打错/路由不存在」与「服务内部故障」混为一谈（台账 L044）。
+     * 典型场景：调用方把 PUT /admin/users/{id}/password 误写成 POST .../reset-password。
+     */
+    @ExceptionHandler(org.springframework.web.servlet.resource.NoResourceFoundException.class)
+    @ResponseStatus(HttpStatus.NOT_FOUND)
+    public Result<?> handleNoResourceFound(org.springframework.web.servlet.resource.NoResourceFoundException e,
+                                           HttpServletRequest req) {
+        log.warn("接口不存在 [{}]: {}", req.getRequestURI(), e.getMessage());
+        return Result.fail(404, "接口不存在: " + req.getRequestURI()).withTraceId(MDC.get("traceId"));
+    }
+
     @ExceptionHandler(Exception.class)
     @ResponseStatus(HttpStatus.INTERNAL_SERVER_ERROR)
     public Result<?> handleUnknown(Exception e, HttpServletRequest req) {

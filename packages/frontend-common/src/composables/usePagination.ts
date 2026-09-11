@@ -4,7 +4,7 @@
  */
 
 import { ref, computed, reactive } from 'vue'
-import type { PaginationParams } from '../types/pagination'
+import type { PaginationParams, PaginatedResponse } from '../types/pagination'
 
 export interface PaginationOptions<T = any> {
   /** 获取分页数据的 API 函数 */

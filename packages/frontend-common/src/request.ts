@@ -286,5 +286,3 @@ export interface RequestClient extends AxiosInstance {
   /** 清除所有 token */
   clearTokens(): void
 }
-
-export type { CreateRequestOptions, TokenStore, RequestClient }

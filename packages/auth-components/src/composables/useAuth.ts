@@ -8,7 +8,7 @@ import type { SsoConfig, AuthState, UseAuthOptions } from '../types'
 import { getToken, setToken, getRefreshToken, setRefreshToken, clearTokens, getTokenKind, setTokenKind, decodeOidcClaims } from '../utils/token'
 import { refreshOidcToken } from '../utils/sso'
 
-export function useAuth(options: UseAuth = {}) {
+export function useAuth(options: UseAuthOptions = {}) {
   const loading = ref(false)
   const error = ref<string | null>(null)
   const user = ref<{ username?: string; [key: string]: any }>({})

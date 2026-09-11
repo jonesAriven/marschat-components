@@ -7,9 +7,11 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.slf4j.MDC;
+import org.springframework.http.HttpMethod;
 import org.springframework.validation.BindingResult;
 import org.springframework.validation.FieldError;
 import org.springframework.web.bind.MethodArgumentNotValidException;
+import org.springframework.web.servlet.resource.NoResourceFoundException;
 
 import java.util.Collections;
 import java.util.List;
@@ -210,5 +212,29 @@ class GlobalExceptionHandlerTest {
         Result<?> result = handler.handleUnknown(ex, request);
 
         assertEquals(500, result.getCode());
+    }
+
+    // ===== handleNoResourceFound（L044）=====
+
+    @Test
+    @DisplayName("handleNoResourceFound_无匹配路由_返回404而非500")
+    void handleNoResourceFound_returns404() {
+        NoResourceFoundException ex = new NoResourceFoundException(HttpMethod.POST, "/admin/users/1/reset-password");
+
+        Result<?> result = handler.handleNoResourceFound(ex, request);
+
+        assertEquals(404, result.getCode());
+        assertTrue(result.getMessage().contains("/api/test"), "消息应含请求路径（来自 req.getRequestURI()）");
+    }
+
+    @Test
+    @DisplayName("handleNoResourceFound_MDC含traceId_响应注入traceId")
+    void handleNoResourceFound_withTraceId_injectsTraceId() {
+        MDC.put("traceId", "trace-404");
+        NoResourceFoundException ex = new NoResourceFoundException(HttpMethod.GET, "/nope");
+
+        Result<?> result = handler.handleNoResourceFound(ex, request);
+
+        assertEquals("trace-404", result.getTraceId());
     }
 }
