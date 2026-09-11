@@ -5,10 +5,10 @@ packages:
   # 前端 npm 包
   - 'packages/*'
 
-allowBuilds:
-  '@parcel/watcher': set this to true or false
-  esbuild: set this to true or false
-  vue-demi: set this to true or false
+onlyBuiltDependencies:
+  - '@parcel/watcher'
+  - esbuild
+  - vue-demi
 
 # 共享依赖版本
 catalogs:
