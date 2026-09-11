@@ -81,6 +81,18 @@ export interface SessionWatcherOptions {
    *   本地凭据没清干净，下次静默免登又会把人登回去。
    */
   clearLocalAuth?: () => void
+  /**
+   * 本地凭据所属的身份（auth-center 的 `sub`/uid 字符串）。注入后启用**身份一致性守卫**：
+   * 探针返回「已认证」但身份与本地不一致（典型场景：共享浏览器上 A 的本地 token 未清、
+   * IdP 会话已是 B）→ 判定会话错位，执行 `onIdentityMismatch`（静默切到当前 IdP 身份）。
+   * 不注入则不做身份比对（维持 0.5.x 行为）。
+   */
+  getLocalIdentity?: () => string | null | undefined
+  /**
+   * 身份错位时的回调：应用注入「静默重新换票」（如 `() => renewByReauthorize()`，
+   * IdP 会话有效则秒回新身份，用户无感）。未注入时保守兜底：清本地并跳登录页（`?reauth=1`）。
+   */
+  onIdentityMismatch?: () => void
 }
 
 /** 会话监视器句柄 */
@@ -176,6 +188,24 @@ export function createSessionWatcher(
 
       if (probe.authenticated) {
         lostStreak = 0
+        // 身份一致性守卫（0.5.4）：IdP 会话存在但身份 ≠ 本地凭据的身份
+        // （共享浏览器换人登录，前任的本地 token 还在）→ 静默切到当前 IdP 身份。
+        // 语义铁律：「IdP 会话是谁，应用会话就应是谁」。
+        const localId = opts.getLocalIdentity?.()
+        if (localId && probe.username && String(probe.username) !== String(localId)) {
+          stopWatcher()
+          clearAuth()
+          if (opts.onIdentityMismatch) {
+            opts.onIdentityMismatch()
+          } else {
+            // 保守兜底：清本地后回登录页重新发起（reauth=1 与 slo=1 语义区分）
+            if (opts.redirectOnLost && !isOnLoginPage(loginUrl)) {
+              const sep = loginUrl.includes('?') ? '&' : '?'
+              window.location.assign(`${loginUrl}${sep}reauth=1`)
+            }
+          }
+          return false
+        }
         return true
       }
 
