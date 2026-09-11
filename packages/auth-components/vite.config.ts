@@ -24,6 +24,12 @@ function injectStyleImport(): Plugin {
 }
 
 export default defineConfig({
+  define: {
+    // src/umd.ts 里的版本号（createSsoClient 会挂到 MarschatAuth.version）
+    __AUTH_CORE_VERSION__: JSON.stringify(
+      JSON.parse(readFileSync(resolve(__dirname, 'package.json'), 'utf8')).version
+    ),
+  },
   plugins: [vue(), injectStyleImport()],
   build: {
     lib: {

@@ -5,6 +5,22 @@ packages:
   # 前端 npm 包
   - 'packages/*'
 
+# 允许执行安装脚本的原生编译包（pnpm 11 的机制是 allowBuilds，**值必须是布尔**）
+#
+# ⚠️ 历史坑（2026-09-11 实测，pnpm 11.6.0）：这一段**曾经**是脚手架残留的占位模板 ——
+#   allowBuilds:
+#     '@parcel/watcher': set this to true or false
+#     esbuild: set this to true or false
+#     vue-demi: set this to true or false
+#   值既不是 true 也不是 false，pnpm 视为"全部不允许" → 三个包的 build script 全被跳过，
+#   `pnpm install` 报 [ERR_PNPM_IGNORED_BUILDS] 且**退出码 = 1**（把安装判定为失败）。
+#   同时只有 onlyBuiltDependencies、没有 allowBuilds 时，pnpm 11 **不认**（仍报同样错误）——
+#   所以两者都要写：allowBuilds 给 pnpm 11，onlyBuiltDependencies 兼容 pnpm 10。
+allowBuilds:
+  '@parcel/watcher': true
+  esbuild: true
+  vue-demi: true
+
 onlyBuiltDependencies:
   - '@parcel/watcher'
   - esbuild

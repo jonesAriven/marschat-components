@@ -4,7 +4,7 @@
 
 /** SSO 配置选项 */
 export interface SsoConfig {
-  /** OIDC Issuer 地址 */
+  /** OIDC Issuer 地址（同时也是 auth-center 基地址，用于 /auth/session、/auth/slo） */
   issuer: string
   /** 客户端 ID */
   clientId: string
@@ -14,6 +14,48 @@ export interface SsoConfig {
   scope?: string
   /** Token 存储的 localStorage key 前缀 */
   tokenKeyPrefix?: string
+  /**
+   * 本应用登录页的完整 URL。
+   *
+   * 用途：
+   * 1. 统一登出（SLO）默认回跳地址；
+   * 2. 静默免登探测失败时不做事（页面正常显示登录框），成功时跳授权。
+   *
+   * 必须落在 auth-center 该客户端的 `post_logout_redirect_uris` 白名单内，
+   * 否则后端会丢弃该参数并使用默认回跳。
+   */
+  loginUrl?: string
+  /**
+   * 是否启用静默免登：进入登录页时若探测到 IdP 会话则自动跳授权，用户无感进入。
+   * 默认 true。
+   */
+  silentLogin?: boolean
+  /**
+   * 会话探针 / 统一登出端点的基地址，默认取 `issuer`。
+   * 仅在 auth-center 与 issuer 不同域时（如内网直连）才需要显式覆盖。
+   */
+  authCenterBase?: string
+}
+
+/** 会话探针结果 */
+export interface SessionProbeResult {
+  /** auth-center 侧是否已存在有效 IdP 会话 */
+  authenticated: boolean
+  /** 已登录用户名（未登录为 null） */
+  username?: string | null
+}
+
+/** 统一登出（SLO）选项 */
+export interface SloOptions {
+  /**
+   * 登出后回跳地址。缺省取 `SsoConfig.loginUrl`。
+   * 必须落在该客户端 `post_logout_redirect_uris` 白名单内。
+   */
+  postLogoutRedirectUri?: string
+  /** 透传给 IdP 的 state（原样回到回跳地址） */
+  state?: string
+  /** id_token_hint；缺省自动从本地存储读取（登录回调时已保存） */
+  idTokenHint?: string
 }
 
 /** OIDC Token 响应 */

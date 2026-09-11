@@ -15,8 +15,36 @@ export { useSso } from './composables/useSso'
 export { useAuth } from './composables/useAuth'
 
 // 工具函数
-export { initTokenConfig, getToken, setToken, removeToken, getRefreshToken, setRefreshToken, clearTokens, getTokenKind, setTokenKind, isOidcToken, decodeOidcClaims } from './utils/token'
-export { startSsoLogin, handleSsoCallback, refreshOidcToken, buildSsoAuthorizeUrl } from './utils/sso'
+export {
+  initTokenConfig,
+  getToken,
+  setToken,
+  removeToken,
+  getRefreshToken,
+  setRefreshToken,
+  getIdToken,
+  setIdToken,
+  removeIdToken,
+  clearTokens,
+  getTokenKind,
+  setTokenKind,
+  isOidcToken,
+  decodeOidcClaims,
+} from './utils/token'
+export {
+  startSsoLogin,
+  handleSsoCallback,
+  refreshOidcToken,
+  buildSsoAuthorizeUrl,
+  // 紧密型接入（Phase 6）
+  probeIdpSession,
+  silentSignIn,
+  bootstrapLoginPage,
+  buildSloUrl,
+  ssoLogout,
+  renewByReauthorize,
+  clearLocalAuth,
+} from './utils/sso'
 export { generateVerifier, generateChallenge, generateState, base64UrlEncode } from './utils/pkce'
 
 // 类型
@@ -27,4 +55,18 @@ export type {
   TokenKind,
   LoginPanelConfig,
   AuthState,
+  SessionProbeResult,
+  SloOptions,
 } from './types'
+
+/**
+ * 框架无关的认证客户端工厂（与 UMD 单文件版共用同一实现，见 src/client.ts）。
+ *
+ * 有构建链的 SPA 也可以直接用它，省掉每次重复拼 config 的样板代码：
+ * ```ts
+ * const sso = createSsoClient({ issuer, clientId, redirectUri, loginUrl })
+ * if (await sso.bootstrapLoginPage('/dashboard')) { /* 已跳走 *\/ }
+ * ```
+ */
+export { createSsoClient } from './client'
+export type { SsoClient } from './client'

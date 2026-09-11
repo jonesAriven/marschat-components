@@ -15,6 +15,15 @@ const DEFAULT_CONFIG = {
   accessTokenKey: 'auth_access_token',
   refreshTokenKey: 'auth_refresh_token',
   tokenKindKey: 'auth_token_kind',
+  /**
+   * id_token 存储键。
+   *
+   * ★ 为什么必须存：OIDC RP-Initiated Logout 要求 `id_token_hint`，
+   *   而 SAS 的 /connect/logout 不给 hint 直接 400（实测 2026-09-11）。
+   *   授权码换票时返回的 id_token 必须留住，登出时原样带回去，
+   *   IdP 才能定位到要销毁哪个会话。
+   */
+  idTokenKey: 'auth_id_token',
 }
 
 /**
@@ -66,6 +75,7 @@ export interface InitTokenConfigOptions {
   accessTokenKey?: string
   refreshTokenKey?: string
   tokenKindKey?: string
+  idTokenKey?: string
   cookie?: {
     domain?: string
     path?: string
@@ -202,10 +212,46 @@ export function removeRefreshToken(): void {
   localStorage.removeItem(config.refreshTokenKey)
 }
 
-/** 清除所有 Token */
+/**
+ * 获取 id_token（OIDC 登出必需的 id_token_hint）
+ */
+export function getIdToken(): string | null {
+  try {
+    return localStorage.getItem(config.idTokenKey)
+  } catch {
+    return null
+  }
+}
+
+/**
+ * 保存 id_token
+ *
+ * ⚠️ 只在授权码换票成功后调用（见 handleSsoCallback）。
+ * 存 localStorage 而非 sessionStorage：SLO 可能发生在另一个标签页/刷新之后。
+ */
+export function setIdToken(token: string): void {
+  if (!token) return
+  try {
+    localStorage.setItem(config.idTokenKey, token)
+  } catch (e) {
+    console.warn('[auth] Failed to persist id_token:', e)
+  }
+}
+
+/** 移除 id_token */
+export function removeIdToken(): void {
+  try {
+    localStorage.removeItem(config.idTokenKey)
+  } catch {
+    /* ignore */
+  }
+}
+
+/** 清除所有 Token（含 id_token） */
 export function clearTokens(): void {
   removeToken()
   removeRefreshToken()
+  removeIdToken()
   removeTokenKind()
 }
 

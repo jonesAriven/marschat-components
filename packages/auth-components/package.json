@@ -1,7 +1,7 @@
 {
   "name": "@marschat/auth-components",
-  "version": "0.3.4",
-  "description": "MarsChat 统一认证公共组件库 - SSO 单点登录、独立登录、忘记密码、OIDC PKCE",
+  "version": "0.4.0",
+  "description": "MarsChat 统一认证公共组件库 - SSO 单点登录、静默免登、统一登出(SLO)、独立登录、忘记密码、OIDC PKCE",
   "type": "module",
   "main": "./dist/marschat-auth-components.es.js",
   "module": "./dist/marschat-auth-components.es.js",
@@ -15,11 +15,14 @@
       "require": "./dist/marschat-auth-components.umd.cjs",
       "types": "./dist/index.d.ts"
     },
-    "./style.css": "./dist/style.css"
+    "./style.css": "./dist/style.css",
+    "./umd": "./dist/marschat-auth-core.umd.js"
   },
   "scripts": {
     "dev": "vite",
-    "build": "vue-tsc --noEmit && vite build && vue-tsc -p tsconfig.build.json",
+    "build": "vue-tsc --noEmit && vite build && vite build --config vite.umd.config.ts && vue-tsc -p tsconfig.build.json",
+    "build:es": "vite build",
+    "build:umd": "vite build --config vite.umd.config.ts",
     "preview": "vite preview"
   },
   "dependencies": {
