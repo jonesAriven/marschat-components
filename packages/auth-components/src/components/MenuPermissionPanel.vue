@@ -147,14 +147,17 @@ async function api<T>(path: string, init?: RequestInit): Promise<T> {
 function buildTree(perms: PermNode[]): TreeItem[] {
   const alive = perms.filter((p) => p.status === 1 && p.code)
   permMap.value = new Map(alive.map((p) => [p.code, p]))
-  const items = [...alive].sort((a, b) => a.sort - b.sort || a.id - b.id)
-  const byParent = new Map<number | null, PermNode[]>()
+  // ⚠️ /admin/permissions 由 queryForList 直出，键是 snake_case（parent_id）——双写兼容
+  const items = [...alive]
+    .map((p) => ({ ...p, parentId: (p as any).parent_id ?? p.parentId ?? null }))
+    .sort((a, b) => a.sort - b.sort || a.id - b.id)
+  const byParent = new Map<number | null, typeof items>()
   for (const p of items) {
-    const key = p.parentId ?? null
+    const key = p.parentId
     if (!byParent.has(key)) byParent.set(key, [])
     byParent.get(key)!.push(p)
   }
-  const toTree = (nodes: PermNode[]): TreeItem[] =>
+  const toTree = (nodes: typeof items): TreeItem[] =>
     nodes.map((n) => {
       const kids = byParent.get(n.id) || []
       const item: TreeItem = { code: n.code, label: n.name || n.code }
