@@ -21,6 +21,13 @@ export { useLoading } from './composables/useLoading'
 export { formatDateTime } from './utils/format'
 export { storage } from './utils/storage'
 
+// Phase 2：RBAC 路由守卫（权限拉取/判定由应用注入 auth-components 的 usePermissions，保持本包零跨包依赖）
+export { createAuthGuard } from './authGuard'
+export type { AuthGuardOptions } from './authGuard'
+// Phase 2：统一侧边栏渲染（纯展示，输入 useMenus().visibleMenus）
+export { default as SidebarMenu } from './components/SidebarMenu.vue'
+export type { SidebarMenuItem } from './components/SidebarMenu.vue'
+
 // 类型导出
 export type { RequestClient, AxiosRequestConfig, RequestOptions } from './types'
 export type { PaginatedResponse, PaginationParams } from './types/pagination'
