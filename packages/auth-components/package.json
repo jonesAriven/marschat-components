@@ -1,6 +1,6 @@
 {
   "name": "@marschat/auth-components",
-  "version": "0.6.2",
+  "version": "0.6.3",
   "description": "MarsChat 统一认证公共组件库 - SSO 单点登录、静默免登、统一登出(SLO)、会话监视、统一用户管理、RBAC 权限(usePermissions/useMenus/PermissionGate)、OIDC PKCE",
   "type": "module",
   "main": "./dist/marschat-auth-components.es.js",

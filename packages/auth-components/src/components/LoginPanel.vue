@@ -12,7 +12,9 @@
         <p v-if="config.subtitle" class="login-subtitle">{{ config.subtitle }}</p>
       </div>
 
-      <!-- 独立登录表单 -->
+      <!-- 独立登录表单（showLocalLogin !== false 时渲染；纯 SSO 应用如 kb-ops 后端
+           无本地登录端点，应传 false 隐藏，避免展示一个必然 403 的死表单） -->
+      <template v-if="config.showLocalLogin !== false">
       <el-form
         ref="formRef"
         :model="form"
@@ -56,10 +58,11 @@
           </el-button>
         </el-form-item>
       </el-form>
+      </template>
 
       <!-- SSO 分隔线与按钮 -->
       <template v-if="config.showSso !== false && config.ssoConfig">
-        <el-divider content-position="center">{{ labels.dividerText }}</el-divider>
+        <el-divider v-if="config.showLocalLogin !== false" content-position="center">{{ labels.dividerText }}</el-divider>
         <el-button
           type="success"
           class="sso-btn"

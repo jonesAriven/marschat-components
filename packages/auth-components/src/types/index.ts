@@ -134,6 +134,12 @@ export interface LoginPanelConfig {
   color?: string
   /** 是否显示 SSO 按钮，默认 true */
   showSso?: boolean
+  /**
+   * 是否显示本地账号密码表单，默认 true。
+   * 纯 SSO 应用（后端无本地登录端点，如 kb-ops）应传 false——
+   * 否则展示一个提交必 403 的死表单（2026-09-13 kb-ops 浏览器实测）。
+   */
+  showLocalLogin?: boolean
   /** 是否显示忘记密码链接，默认 true */
   showForgotPassword?: boolean
   /**
