@@ -13,6 +13,9 @@ when:
 steps:
   - name: maven-deploy-common-core
     image: maven:3.9-eclipse-temurin-21
+    # 同版本重发会被 Nexus 拒 400（redeploy not allowed）——maven 发版已在 #7 验证成功，
+    # 此处 ignore 让后续 npm 步骤得以验证
+    failure: ignore
     environment:
       NEXUS_USER:
         from_secret: nexus_user
@@ -30,6 +33,7 @@ steps:
 
   - name: maven-deploy-auth-core
     image: maven:3.9-eclipse-temurin-21
+    failure: ignore
     environment:
       NEXUS_USER:
         from_secret: nexus_user
