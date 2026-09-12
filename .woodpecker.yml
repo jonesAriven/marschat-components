@@ -41,7 +41,7 @@ steps:
       - echo "<settings><mirrors><mirror><id>nexus-internal</id><mirrorOf>*</mirrorOf><url>http://192.168.31.105:8081/repository/maven-public/</url></mirror></mirrors><servers><server><id>nexus-releases</id><username>$${NEXUS_USER}</username><password>$${NEXUS_PASS}</password></server><server><id>nexus-snapshots</id><username>$${NEXUS_USER}</username><password>$${NEXUS_PASS}</password></server></servers></settings>" > /root/.m2/settings.xml
       - cd java/common-core
       - VER=$$(grep -A1 '<artifactId>common-core</artifactId>' pom.xml | grep -m1 '<version>' | sed 's/.*<version>//;s/<\/version>.*//')
-      - echo "构建版本: $$VER"
+      - echo "构建版本 $$VER"
       - if curl -sf -o /dev/null "http://192.168.31.105:8081/repository/maven-releases/com/marschat/common-core/$$VER/common-core-$$VER.pom"; then echo "版本 $$VER 已在 Nexus，幂等跳过 deploy"; else mvn -B deploy -DskipTests; fi
 
   - name: maven-deploy-auth-core
@@ -58,7 +58,7 @@ steps:
       - echo "<settings><mirrors><mirror><id>nexus-internal</id><mirrorOf>*</mirrorOf><url>http://192.168.31.105:8081/repository/maven-public/</url></mirror></mirrors><servers><server><id>nexus-releases</id><username>$${NEXUS_USER}</username><password>$${NEXUS_PASS}</password></server><server><id>nexus-snapshots</id><username>$${NEXUS_USER}</username><password>$${NEXUS_PASS}</password></server></servers></settings>" > /root/.m2/settings.xml
       - cd java/auth-core
       - VER=$$(grep -A1 '<artifactId>auth-core</artifactId>' pom.xml | grep -m1 '<version>' | sed 's/.*<version>//;s/<\/version>.*//')
-      - echo "构建版本: $$VER"
+      - echo "构建版本 $$VER"
       - if curl -sf -o /dev/null "http://192.168.31.105:8081/repository/maven-releases/com/marschat/auth-core/$$VER/auth-core-$$VER.pom"; then echo "版本 $$VER 已在 Nexus，幂等跳过 deploy"; else mvn -B deploy -DskipTests; fi
 
   - name: npm-publish-auth-components
@@ -74,7 +74,7 @@ steps:
       - export NEXUS_AUTH=$(printf "%s:%s" "$${NEXUS_USER}" "$${NEXUS_PASS}" | base64)
       - cd packages/auth-components
       - VER=$$(node -p "require('./package.json').version")
-      - echo "构建版本: $$VER"
+      - echo "构建版本 $$VER"
       - if curl -sf "http://192.168.31.105:8081/repository/npm-hosted/@marschat/auth-components" | grep -q "\"$$VER\""; then echo "版本 $$VER 已在 Nexus，幂等跳过 publish"; exit 0; fi
       - corepack enable
       - corepack prepare pnpm@9.15.9 --activate
@@ -94,7 +94,7 @@ steps:
       - export NEXUS_AUTH=$(printf "%s:%s" "$${NEXUS_USER}" "$${NEXUS_PASS}" | base64)
       - cd packages/frontend-common
       - VER=$$(node -p "require('./package.json').version")
-      - echo "构建版本: $$VER"
+      - echo "构建版本 $$VER"
       - if curl -sf "http://192.168.31.105:8081/repository/npm-hosted/@marschat/frontend-common" | grep -q "\"$$VER\""; then echo "版本 $$VER 已在 Nexus，幂等跳过 publish"; exit 0; fi
       - corepack enable
       - corepack prepare pnpm@9.15.9 --activate
