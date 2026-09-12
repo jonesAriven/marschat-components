@@ -8,7 +8,11 @@
 #    200MB 依赖永远跑不完被 kill。修复（本机实测 850kB/s + 缓存命中秒级）：
 #    ① settings.xml 加内网 mirror（runner 与 Nexus 同机 192.168.31.105）；
 #    ② 挂宿主 /root/.m2-cache/marschat 持久缓存卷（repo trusted.volumes=true）。
-#    deploy 上传仍走 pom 的 distributionManagement（https 公网，jar 小无影响；mirror 不作用于 deploy）。
+# ⚠️ 教训（#15/#16/#17 + 良哥 2026-09-13 纠正）：
+#    ① 同版本重跑必 400 红叉（maven-releases 禁 redeploy）——failure:ignore 吞掉后 pipeline 假绿，
+#      步骤级全是 failure。修复=deploy/publish 前查内网 Nexus 版本已存在则幂等跳过，去掉 ignore；
+#    ② deploy 上传/npm registry 曾绕公网域名——同机传输一律走 http://192.168.31.105:8081
+#      （pom distributionManagement 已同步改 IP；mirror 不作用于 deploy，distributionManagement 不受 http blocker 限制）。
 
 when:
   - event: push
@@ -16,11 +20,15 @@ when:
   - event: manual
 
 steps:
+  # ⚠️ 幂等语义（#15/#16/#17 教训）：Nexus maven-releases 禁同版本重发，重跑流水线
+  #    必 400 红叉（failure:ignore 吞掉后 pipeline 假绿）。改为 deploy 前查内网 Nexus
+  #    该版本是否已存在：存在→幂等跳过（步骤 success 无红叉），不存在→真正 deploy。
+  #    去掉 failure: ignore——真失败显性红，且 fail-fast 阻断后续步骤。
+  # ⚠️ 全链内网 IP（良哥 2026-09-13 纠正）：runner 与 Nexus 同在 mykng，下载 mirror /
+  #    deploy 上传 / npm registry 一律 http://192.168.31.105:8081，禁止绕公网域名
+  #    （容器→公网DNS→腾讯云2号 nginx→回 mykng 的环，受 3Mbps EIP 限制）。
   - name: maven-deploy-common-core
     image: maven:3.9-eclipse-temurin-21
-    # 同版本重发会被 Nexus 拒 400（redeploy not allowed）——maven 发版已在 #7 验证成功，
-    # 此处 ignore 让后续 npm 步骤得以验证
-    failure: ignore
     environment:
       NEXUS_USER:
         from_secret: nexus_user
@@ -32,11 +40,12 @@ steps:
       - mkdir -p /root/.m2
       - echo "<settings><mirrors><mirror><id>nexus-internal</id><mirrorOf>*</mirrorOf><url>http://192.168.31.105:8081/repository/maven-public/</url></mirror></mirrors><servers><server><id>nexus-releases</id><username>$${NEXUS_USER}</username><password>$${NEXUS_PASS}</password></server><server><id>nexus-snapshots</id><username>$${NEXUS_USER}</username><password>$${NEXUS_PASS}</password></server></servers></settings>" > /root/.m2/settings.xml
       - cd java/common-core
-      - mvn -B deploy -DskipTests
+      - VER=$$(grep -A1 '<artifactId>common-core</artifactId>' pom.xml | grep -m1 '<version>' | sed 's/.*<version>//;s/<\/version>.*//')
+      - echo "构建版本: $$VER"
+      - if curl -sf -o /dev/null "http://192.168.31.105:8081/repository/maven-releases/com/marschat/common-core/$$VER/common-core-$$VER.pom"; then echo "版本 $$VER 已在 Nexus，幂等跳过 deploy"; else mvn -B deploy -DskipTests; fi
 
   - name: maven-deploy-auth-core
     image: maven:3.9-eclipse-temurin-21
-    failure: ignore
     environment:
       NEXUS_USER:
         from_secret: nexus_user
@@ -48,7 +57,9 @@ steps:
       - mkdir -p /root/.m2
       - echo "<settings><mirrors><mirror><id>nexus-internal</id><mirrorOf>*</mirrorOf><url>http://192.168.31.105:8081/repository/maven-public/</url></mirror></mirrors><servers><server><id>nexus-releases</id><username>$${NEXUS_USER}</username><password>$${NEXUS_PASS}</password></server><server><id>nexus-snapshots</id><username>$${NEXUS_USER}</username><password>$${NEXUS_PASS}</password></server></servers></settings>" > /root/.m2/settings.xml
       - cd java/auth-core
-      - mvn -B deploy -DskipTests
+      - VER=$$(grep -A1 '<artifactId>auth-core</artifactId>' pom.xml | grep -m1 '<version>' | sed 's/.*<version>//;s/<\/version>.*//')
+      - echo "构建版本: $$VER"
+      - if curl -sf -o /dev/null "http://192.168.31.105:8081/repository/maven-releases/com/marschat/auth-core/$$VER/auth-core-$$VER.pom"; then echo "版本 $$VER 已在 Nexus，幂等跳过 deploy"; else mvn -B deploy -DskipTests; fi
 
   - name: npm-publish-auth-components
     image: node:22-alpine
@@ -57,17 +68,19 @@ steps:
         from_secret: nexus_user
       NEXUS_PASS:
         from_secret: nexus_pass
-      # ⚠️ corepack 必须指 Nexus，否则 prepare 从 registry.npmjs.org 拉 pnpm 二进制——
-      # runner 直连官方源会挂死（§16.15.4 同根因，#7 实测卡 15 分钟）
-      COREPACK_NPM_REGISTRY: https://nexus.marschat.online/repository/npm-public/
+      # ⚠️ corepack 必须指内网 Nexus，否则 prepare 从 registry.npmjs.org 拉 pnpm 二进制挂死
+      COREPACK_NPM_REGISTRY: http://192.168.31.105:8081/repository/npm-public/
     commands:
       - export NEXUS_AUTH=$(printf "%s:%s" "$${NEXUS_USER}" "$${NEXUS_PASS}" | base64)
       - cd packages/auth-components
+      - VER=$$(node -p "require('./package.json').version")
+      - echo "构建版本: $$VER"
+      - if curl -sf "http://192.168.31.105:8081/repository/npm-hosted/@marschat/auth-components" | grep -q "\"$$VER\""; then echo "版本 $$VER 已在 Nexus，幂等跳过 publish"; exit 0; fi
       - corepack enable
       - corepack prepare pnpm@9.15.9 --activate
-      - pnpm install --frozen-lockfile --registry https://nexus.marschat.online/repository/npm-public/
+      - pnpm install --frozen-lockfile --registry http://192.168.31.105:8081/repository/npm-public/
       - pnpm build
-      - npm publish --registry https://nexus.marschat.online/repository/npm-hosted/ --//nexus.marschat.online/repository/npm-hosted/:_auth=$${NEXUS_AUTH} --//nexus.marschat.online/repository/npm-hosted/:always-auth=true
+      - npm publish --registry http://192.168.31.105:8081/repository/npm-hosted/ --//192.168.31.105:8081/repository/npm-hosted/:_auth=$${NEXUS_AUTH} --//192.168.31.105:8081/repository/npm-hosted/:always-auth=true
 
   - name: npm-publish-frontend-common
     image: node:22-alpine
@@ -76,13 +89,16 @@ steps:
         from_secret: nexus_user
       NEXUS_PASS:
         from_secret: nexus_pass
-      COREPACK_NPM_REGISTRY: https://nexus.marschat.online/repository/npm-public/
+      COREPACK_NPM_REGISTRY: http://192.168.31.105:8081/repository/npm-public/
     commands:
       - export NEXUS_AUTH=$(printf "%s:%s" "$${NEXUS_USER}" "$${NEXUS_PASS}" | base64)
       - cd packages/frontend-common
+      - VER=$$(node -p "require('./package.json').version")
+      - echo "构建版本: $$VER"
+      - if curl -sf "http://192.168.31.105:8081/repository/npm-hosted/@marschat/frontend-common" | grep -q "\"$$VER\""; then echo "版本 $$VER 已在 Nexus，幂等跳过 publish"; exit 0; fi
       - corepack enable
       - corepack prepare pnpm@9.15.9 --activate
       # ⚠️ 不能用 npm install——monorepo 根的 husky postinstall 会失败（#10 实测），统一走 pnpm workspace
-      - pnpm install --frozen-lockfile --filter @marschat/frontend-common
+      - pnpm install --frozen-lockfile --filter @marschat/frontend-common --registry http://192.168.31.105:8081/repository/npm-public/
       - pnpm --filter @marschat/frontend-common build
-      - npm publish --registry https://nexus.marschat.online/repository/npm-hosted/ --//nexus.marschat.online/repository/npm-hosted/:_auth=$${NEXUS_AUTH} --//nexus.marschat.online/repository/npm-hosted/:always-auth=true
+      - npm publish --registry http://192.168.31.105:8081/repository/npm-hosted/ --//192.168.31.105:8081/repository/npm-hosted/:_auth=$${NEXUS_AUTH} --//192.168.31.105:8081/repository/npm-hosted/:always-auth=true
