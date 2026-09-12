@@ -21,9 +21,10 @@ steps:
     commands:
       - mkdir -p /root/.m2
       - echo "<settings><servers><server><id>nexus-releases</id><username>$${NEXUS_USER}</username><password>$${NEXUS_PASS}</password></server><server><id>nexus-snapshots</id><username>$${NEXUS_USER}</username><password>$${NEXUS_PASS}</password></server></servers></settings>" > /root/.m2/settings.xml
-      - echo "--- settings.xml 注入自检（密码遮蔽）---"
-      - sed "s/Hwx.*/Hwx***/" /root/.m2/settings.xml
-      - echo "--- HOME=$${HOME} user=$$(id -un) ---"
+      - echo "--- 凭据 curl 直测（只输出状态码）---"
+      - curl -s -o /dev/null -w "nexus status: %{http_code}\n" -u "$${NEXUS_USER}:$${NEXUS_PASS}" https://nexus.marschat.online/service/rest/v1/status
+      - echo "--- settings.xml 中 username 长度（不回显值）---"
+      - grep -o "<username>[^<]*</username>" /root/.m2/settings.xml | head -1 | wc -c
       - cd java/common-core
       - mvn -B deploy -DskipTests
 
