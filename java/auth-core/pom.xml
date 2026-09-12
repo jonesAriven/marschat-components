@@ -22,7 +22,7 @@
 
     <groupId>com.marschat</groupId>
     <artifactId>auth-core</artifactId>
-    <version>2.1.0</version>
+    <version>2.1.1</version>
     <name>auth-core</name>
     <description>认证公共库（独立 jar）：jjwt HS256 验签 + OIDC RS256 双验签 / LoginUser 解析 / Feign token 透传 —— SSO Phase 2 落地件</description>
 
