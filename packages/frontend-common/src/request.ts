@@ -142,7 +142,7 @@ export interface CreateRequestOptions {
  * })
  * ```
  */
-export function createRequest(options: CreateRequestOptions = {}): RequestClient {
+export function createRequest(options: CreateRequestOptions = {}): CreateRequestResult {
   const {
     baseURL = '/api',
     authBaseURL = '/auth-api',
@@ -151,10 +151,10 @@ export function createRequest(options: CreateRequestOptions = {}): RequestClient
     useSsoCookie,
     whiteListPaths = ['/login', '/register', '/refresh', '/health'],
     onError = (msg: string, error: any) => console.error('[request]', error),
-    onUnauthorized = () => { 
+    onUnauthorized = () => {
       // 默认：清除 token 并跳转登录
       clearTokens()
-      window.location.href = '/login' 
+      window.location.href = '/login'
     },
     ...restOptions
   } = options
@@ -272,7 +272,68 @@ export function createRequest(options: CreateRequestOptions = {}): RequestClient
     tokenStore?.removeRefreshToken()
   }
 
-  return client
+  // ── auth 实例（认证端点专用：/login /logout /refresh /me）──
+  // 契约（迁移前各应用 request.ts 的既有语义）：
+  //   业务实例 request = 返回完整 AxiosResponse；
+  //   auth 实例 authRequest = authBaseURL + Result 解包（拦截器直接 return data.data，
+  //   调用方 `authRequest.post('/login') as Promise<LoginResponse>` 直接拿业务对象）。
+  // ⚠️ 0.3.2 及之前 createRequest 只建单实例却收 authBaseURL 参数——authRequest
+  //   解构恒为 undefined（kb-ops-web 登录报 "reading 'post' of undefined"，0.3.3 根治）。
+  const authInstance: AxiosInstance = axios.create({
+    baseURL: authBaseURL,
+    timeout: 15000,
+    withCredentials: useSsoCookie ?? (getTokenSource() === 'cookie'),
+  })
+  authInstance.interceptors.request.use((config: InternalAxiosRequestConfig) => {
+    const isSsoMode = useSsoCookie ?? (getTokenSource() === 'cookie')
+    if (!isSsoMode) {
+      const token = tokenStore?.getToken() || getToken()
+      if (token) {
+        config.headers.Authorization = `Bearer ${token}`
+      }
+    }
+    return config
+  })
+  authInstance.interceptors.response.use(
+    (response: AxiosResponse) => {
+      const data = response.data as any
+      // Result 封装解包：{code, message, data} → 直接返回 data（业务对象）
+      if (typeof data === 'object' && data !== null && 'code' in data) {
+        if (data.code === 200 || data.code === 0) {
+          return data.data ?? data
+        }
+        const msg = data.message || '请求失败'
+        if (onError) onError(msg, data, false)
+        return Promise.reject(new Error(msg))
+      }
+      // 非 Result 格式：返回 body 本身
+      return data
+    },
+    async (error: any) => {
+      const status = error.response?.status
+      if (status === 401) {
+        if (onUnauthorized) {
+          const result = onUnauthorized()
+          if (result instanceof Promise) return result
+        } else {
+          clearTokens()
+          window.location.href = '/login'
+        }
+        return Promise.reject(error)
+      }
+      const msg = error.response?.data?.message || error.message || `HTTP ${status}`
+      if (onError) onError(msg, error, true)
+      return Promise.reject(error)
+    },
+  )
+  const authClient = authInstance as any as RequestClient
+  authClient.getToken = () => tokenStore?.getToken() ?? getToken()
+  authClient.clearTokens = () => {
+    tokenStore?.removeToken()
+    tokenStore?.removeRefreshToken()
+  }
+
+  return { request: client, authRequest: authClient }
 }
 
 /** RequestClient 类型 - 增强版 AxiosInstance */
@@ -285,4 +346,14 @@ export interface RequestClient extends AxiosInstance {
   getRefreshToken(): string | null
   /** 清除所有 token */
   clearTokens(): void
+}
+
+/**
+ * createRequest 返回的双实例（0.3.3 起）。
+ * - request：业务实例（baseURL），返回完整 AxiosResponse；
+ * - authRequest：认证实例（authBaseURL），Result 解包后直接返回业务对象。
+ */
+export interface CreateRequestResult {
+  request: RequestClient
+  authRequest: RequestClient
 }
