@@ -40,7 +40,7 @@ steps:
       - mkdir -p /root/.m2
       - echo "<settings><mirrors><mirror><id>nexus-internal</id><mirrorOf>*</mirrorOf><url>http://192.168.31.105:8081/repository/maven-public/</url></mirror></mirrors><servers><server><id>nexus-releases</id><username>$${NEXUS_USER}</username><password>$${NEXUS_PASS}</password></server><server><id>nexus-snapshots</id><username>$${NEXUS_USER}</username><password>$${NEXUS_PASS}</password></server></servers></settings>" > /root/.m2/settings.xml
       - cd java/common-core
-      - VER=$$(grep -A1 '<artifactId>common-core</artifactId>' pom.xml | grep -m1 '<version>' | sed 's/.*<version>//;s/<\/version>.*//')
+      - VER=$$(grep -A1 '<artifactId>common-core</artifactId>' pom.xml | awk -F'[<>]' '/<version>/{print $3; exit}')
       - echo "构建版本 $$VER"
       - if curl -sf -o /dev/null "http://192.168.31.105:8081/repository/maven-releases/com/marschat/common-core/$$VER/common-core-$$VER.pom"; then echo "版本 $$VER 已在 Nexus，幂等跳过 deploy"; else mvn -B deploy -DskipTests; fi
 
@@ -57,7 +57,7 @@ steps:
       - mkdir -p /root/.m2
       - echo "<settings><mirrors><mirror><id>nexus-internal</id><mirrorOf>*</mirrorOf><url>http://192.168.31.105:8081/repository/maven-public/</url></mirror></mirrors><servers><server><id>nexus-releases</id><username>$${NEXUS_USER}</username><password>$${NEXUS_PASS}</password></server><server><id>nexus-snapshots</id><username>$${NEXUS_USER}</username><password>$${NEXUS_PASS}</password></server></servers></settings>" > /root/.m2/settings.xml
       - cd java/auth-core
-      - VER=$$(grep -A1 '<artifactId>auth-core</artifactId>' pom.xml | grep -m1 '<version>' | sed 's/.*<version>//;s/<\/version>.*//')
+      - VER=$$(grep -A1 '<artifactId>auth-core</artifactId>' pom.xml | awk -F'[<>]' '/<version>/{print $3; exit}')
       - echo "构建版本 $$VER"
       - if curl -sf -o /dev/null "http://192.168.31.105:8081/repository/maven-releases/com/marschat/auth-core/$$VER/auth-core-$$VER.pom"; then echo "版本 $$VER 已在 Nexus，幂等跳过 deploy"; else mvn -B deploy -DskipTests; fi
 
