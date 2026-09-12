@@ -75,6 +75,9 @@ steps:
     commands:
       - export NEXUS_AUTH=$(printf "%s:%s" "$${NEXUS_USER}" "$${NEXUS_PASS}" | base64)
       - cd packages/frontend-common
-      - npm install --no-package-lock --registry https://nexus.marschat.online/repository/npm-public/
-      - npm run build
+      - corepack enable
+      - corepack prepare pnpm@9.15.9 --activate
+      # ⚠️ 不能用 npm install——monorepo 根的 husky postinstall 会失败（#10 实测），统一走 pnpm workspace
+      - pnpm install --frozen-lockfile --filter @marschat/frontend-common
+      - pnpm --filter @marschat/frontend-common build
       - npm publish --registry https://nexus.marschat.online/repository/npm-hosted/ --//nexus.marschat.online/repository/npm-hosted/:_auth=$${NEXUS_AUTH} --//nexus.marschat.online/repository/npm-hosted/:always-auth=true
