@@ -20,7 +20,7 @@
 
     <groupId>com.marschat</groupId>
     <artifactId>common-core</artifactId>
-    <version>1.1.5</version>
+    <version>1.1.6</version>
     <name>common-core</name>
     <description>公共核心库（独立 jar）：统一返回、异常体系、链路追踪、事件总线、业务断言、crypto(AES-256-GCM 双读)、audit(@AuditOperation) —— 发布到 Nexus，供全部自研服务引用</description>
 

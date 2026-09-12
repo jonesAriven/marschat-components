@@ -4,6 +4,11 @@
 # 前置 secrets（Woodpecker Repo 5）：nexus_user / nexus_pass（Nexus admin 凭据）
 # ⚠️ 教训（#1 实测）：① maven deploy 401 = secrets 配错/后配；② commands 数组的 && 链
 #    在 mvn 失败后短路，后续相对路径 cd 全部落空——多包部署必须拆独立 step。
+# ⚠️ 教训（#12/#13 实测）：maven 依赖下载走公网 nexus.marschat.online（绕腾讯云2号）速度 11~436kB/s，
+#    200MB 依赖永远跑不完被 kill。修复（本机实测 850kB/s + 缓存命中秒级）：
+#    ① settings.xml 加内网 mirror（runner 与 Nexus 同机 192.168.31.105）；
+#    ② 挂宿主 /root/.m2-cache/marschat 持久缓存卷（repo trusted.volumes=true）。
+#    deploy 上传仍走 pom 的 distributionManagement（https 公网，jar 小无影响；mirror 不作用于 deploy）。
 
 when:
   - event: push
@@ -21,13 +26,11 @@ steps:
         from_secret: nexus_user
       NEXUS_PASS:
         from_secret: nexus_pass
+    volumes:
+      - /root/.m2-cache/marschat:/root/.m2/repository
     commands:
       - mkdir -p /root/.m2
-      - echo "<settings><servers><server><id>nexus-releases</id><username>$${NEXUS_USER}</username><password>$${NEXUS_PASS}</password></server><server><id>nexus-snapshots</id><username>$${NEXUS_USER}</username><password>$${NEXUS_PASS}</password></server></servers></settings>" > /root/.m2/settings.xml
-      - echo "--- 凭据 curl 直测（只输出状态码）---"
-      - curl -s -o /dev/null -w "nexus status %{http_code}" -u "$${NEXUS_USER}:$${NEXUS_PASS}" https://nexus.marschat.online/service/rest/v1/status
-      - echo "--- settings.xml 中 username 长度（不回显值）---"
-      - grep -o "<username>[^<]*</username>" /root/.m2/settings.xml | head -1 | wc -c
+      - echo "<settings><mirrors><mirror><id>nexus-internal</id><mirrorOf>*</mirrorOf><url>http://192.168.31.105:8081/repository/maven-public/</url></mirror></mirrors><servers><server><id>nexus-releases</id><username>$${NEXUS_USER}</username><password>$${NEXUS_PASS}</password></server><server><id>nexus-snapshots</id><username>$${NEXUS_USER}</username><password>$${NEXUS_PASS}</password></server></servers></settings>" > /root/.m2/settings.xml
       - cd java/common-core
       - mvn -B deploy -DskipTests
 
@@ -39,9 +42,11 @@ steps:
         from_secret: nexus_user
       NEXUS_PASS:
         from_secret: nexus_pass
+    volumes:
+      - /root/.m2-cache/marschat:/root/.m2/repository
     commands:
       - mkdir -p /root/.m2
-      - echo "<settings><servers><server><id>nexus-releases</id><username>$${NEXUS_USER}</username><password>$${NEXUS_PASS}</password></server><server><id>nexus-snapshots</id><username>$${NEXUS_USER}</username><password>$${NEXUS_PASS}</password></server></servers></settings>" > /root/.m2/settings.xml
+      - echo "<settings><mirrors><mirror><id>nexus-internal</id><mirrorOf>*</mirrorOf><url>http://192.168.31.105:8081/repository/maven-public/</url></mirror></mirrors><servers><server><id>nexus-releases</id><username>$${NEXUS_USER}</username><password>$${NEXUS_PASS}</password></server><server><id>nexus-snapshots</id><username>$${NEXUS_USER}</username><password>$${NEXUS_PASS}</password></server></servers></settings>" > /root/.m2/settings.xml
       - cd java/auth-core
       - mvn -B deploy -DskipTests
 
