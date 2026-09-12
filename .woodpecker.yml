@@ -75,7 +75,7 @@ steps:
       - cd packages/auth-components
       - VER=$$(node -p "require('./package.json').version")
       - echo "构建版本 $$VER"
-      - if curl -sf "http://192.168.31.105:8081/repository/npm-hosted/@marschat/auth-components" | grep -q "\"$$VER\""; then echo "版本 $$VER 已在 Nexus，幂等跳过 publish"; exit 0; fi
+      - if wget -q -O- "http://192.168.31.105:8081/repository/npm-hosted/@marschat/auth-components" | grep -q "\"$$VER\""; then echo "版本 $$VER 已在 Nexus，幂等跳过 publish"; exit 0; fi
       - corepack enable
       - corepack prepare pnpm@9.15.9 --activate
       - pnpm install --frozen-lockfile --registry http://192.168.31.105:8081/repository/npm-public/
@@ -95,7 +95,7 @@ steps:
       - cd packages/frontend-common
       - VER=$$(node -p "require('./package.json').version")
       - echo "构建版本 $$VER"
-      - if curl -sf "http://192.168.31.105:8081/repository/npm-hosted/@marschat/frontend-common" | grep -q "\"$$VER\""; then echo "版本 $$VER 已在 Nexus，幂等跳过 publish"; exit 0; fi
+      - if wget -q -O- "http://192.168.31.105:8081/repository/npm-hosted/@marschat/frontend-common" | grep -q "\"$$VER\""; then echo "版本 $$VER 已在 Nexus，幂等跳过 publish"; exit 0; fi
       - corepack enable
       - corepack prepare pnpm@9.15.9 --activate
       # ⚠️ 不能用 npm install——monorepo 根的 husky postinstall 会失败（#10 实测），统一走 pnpm workspace
