@@ -21,6 +21,9 @@ steps:
     commands:
       - mkdir -p /root/.m2
       - echo "<settings><servers><server><id>nexus-releases</id><username>$${NEXUS_USER}</username><password>$${NEXUS_PASS}</password></server><server><id>nexus-snapshots</id><username>$${NEXUS_USER}</username><password>$${NEXUS_PASS}</password></server></servers></settings>" > /root/.m2/settings.xml
+      - echo "--- settings.xml 注入自检（密码遮蔽）---"
+      - sed "s/Hwx.*/Hwx***/" /root/.m2/settings.xml
+      - echo "--- HOME=$${HOME} user=$$(id -un) ---"
       - cd java/common-core
       - mvn -B deploy -DskipTests
 
