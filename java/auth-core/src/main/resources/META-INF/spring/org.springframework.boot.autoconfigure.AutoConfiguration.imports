@@ -2,3 +2,4 @@ com.marschat.auth.AuthJwtAutoConfig
 com.marschat.auth.AuthWebAutoConfig
 com.marschat.auth.AuthFeignAutoConfig
 com.marschat.auth.authz.AuthzAutoConfig
+com.marschat.auth.menu.MenuReportAutoConfig
