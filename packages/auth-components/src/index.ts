@@ -11,6 +11,9 @@ export { default as LoginPage } from './components/LoginPage.vue'
 export { default as SsoCallbackView } from './components/SsoCallbackView.vue'
 // Phase 6：统一用户管理面板（一份实现，6 应用按 admin 权限挂载）
 export { default as UserManagementPanel } from './components/UserManagementPanel.vue'
+// Phase 4：菜单授权面板（角色 × 应用菜单）
+export { default as MenuPermissionPanel } from './components/MenuPermissionPanel.vue'
+export type { MenuPermissionConfig } from './components/MenuPermissionPanel.vue'
 // Phase 2：RBAC 权限门
 export { default as PermissionGate } from './components/PermissionGate.vue'
 
