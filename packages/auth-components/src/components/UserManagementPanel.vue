@@ -53,7 +53,7 @@
         <el-table-column label="创建时间" width="170">
           <template #default="{ row }">{{ formatTime(row.createdAt) }}</template>
         </el-table-column>
-        <el-table-column v-if="!cfg.readonly" label="操作" width="240" fixed="right">
+        <el-table-column v-if="!cfg.readonly" label="操作" :width="cfg.appRoles ? 300 : 240" fixed="right">
           <template #default="{ row }">
             <el-button link type="primary" size="small" @click="openEdit(row)">编辑</el-button>
             <el-button
@@ -64,6 +64,15 @@
               @click="openReset(row)"
             >
               重置密码
+            </el-button>
+            <el-button
+              v-if="cfg.appRoles"
+              link
+              type="success"
+              size="small"
+              @click="openAppRoles(row)"
+            >
+              应用角色
             </el-button>
             <el-button
               v-if="cfg.allowDelete !== false"
@@ -144,6 +153,37 @@
         <el-button type="primary" :loading="submitting" @click="submitReset">确定</el-button>
       </template>
     </el-dialog>
+
+    <!-- 应用角色绑定（Phase 4 · 用户×系统） -->
+    <el-dialog
+      v-model="appRolesVisible"
+      :title="`应用角色 — ${appRolesTarget?.username || ''}`"
+      width="460px"
+      :close-on-click-modal="false"
+    >
+      <p class="reset-hint">
+        勾选 <b>{{ cfg.appRoles?.clientId }}</b> 应用内分配给该用户的角色（角色可见菜单由
+        「菜单授权」页按角色配置；保存后最迟 60 秒生效）。
+      </p>
+      <div v-loading="appRolesLoading" class="app-roles-list">
+        <el-checkbox
+          v-for="r in appRoleOptions"
+          :key="r.id"
+          v-model="r.checked"
+          class="app-role-item"
+        >
+          {{ r.name || r.code }}
+          <span class="app-role-code">{{ r.code }}</span>
+        </el-checkbox>
+        <div v-if="!appRoleOptions.length && !appRolesLoading" class="app-role-empty">
+          该应用暂无 client 级角色（可在授权面板或 API 创建）
+        </div>
+      </div>
+      <template #footer>
+        <el-button @click="appRolesVisible = false">取消</el-button>
+        <el-button type="primary" :loading="appRolesSaving" @click="saveAppRoles">保存</el-button>
+      </template>
+    </el-dialog>
   </div>
 </template>
 
@@ -220,6 +260,78 @@ function handleSearch(): void {
 }
 
 onMounted(load)
+
+// ---------------- 应用角色绑定（Phase 4 · cfg.appRoles 配置后启用） ----------------
+interface AppRoleOption {
+  id: number
+  code: string
+  name: string
+  checked: boolean
+}
+const appRolesVisible = ref(false)
+const appRolesLoading = ref(false)
+const appRolesSaving = ref(false)
+const appRolesTarget = ref<AdminUserItem | null>(null)
+const appRoleOptions = ref<AppRoleOption[]>([])
+
+function appRolesApi<T>(path: string, init?: RequestInit): Promise<T> {
+  const ar = props.config.appRoles!
+  const token = ar.getToken() || ''
+  return fetch(`${ar.baseUrl.replace(/\/+$/, '')}/admin${path}`, {
+    ...init,
+    headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}`, ...(init?.headers as Record<string, string>) },
+  }).then(async (resp) => {
+    if (resp.status === 401) {
+      ar.onUnauthorized?.()
+      throw new UserAdminError('登录状态已过期', 401)
+    }
+    const body = await resp.json()
+    if (body.code !== 200 && body.code !== 0) {
+      throw new UserAdminError(body.message || `HTTP ${resp.status}`, resp.status)
+    }
+    return body.data as T
+  })
+}
+
+async function openAppRoles(row: AdminUserItem): Promise<void> {
+  appRolesTarget.value = row
+  appRolesVisible.value = true
+  appRolesLoading.value = true
+  appRoleOptions.value = []
+  const clientId = props.config.appRoles!.clientId
+  try {
+    const [allRoles, boundIds] = await Promise.all([
+      appRolesApi<Array<{ id: number; scope: string; clientId: string | null; code: string; name: string }>>('/roles'),
+      appRolesApi<number[]>(`/users/${row.id}/client-roles?client=${encodeURIComponent(clientId)}`),
+    ])
+    appRoleOptions.value = allRoles
+      .filter((r) => r.scope === 'client' && r.clientId === clientId)
+      .map((r) => ({ id: r.id, code: r.code, name: r.name, checked: boundIds.includes(r.id) }))
+  } catch (e) {
+    ElMessage.error(errMsg(e))
+  } finally {
+    appRolesLoading.value = false
+  }
+}
+
+async function saveAppRoles(): Promise<void> {
+  if (!appRolesTarget.value) return
+  appRolesSaving.value = true
+  const clientId = props.config.appRoles!.clientId
+  try {
+    const roleIds = appRoleOptions.value.filter((r) => r.checked).map((r) => r.id)
+    await appRolesApi(`/users/${appRolesTarget.value.id}/client-roles?client=${encodeURIComponent(clientId)}`, {
+      method: 'PUT',
+      body: JSON.stringify({ roleIds }),
+    })
+    ElMessage.success(`已保存：绑定 ${roleIds.length} 个应用角色（最迟 60 秒生效）`)
+    appRolesVisible.value = false
+  } catch (e) {
+    ElMessage.error(errMsg(e))
+  } finally {
+    appRolesSaving.value = false
+  }
+}
 
 // ---------------- 展示助手 ----------------
 function isSelf(row: AdminUserItem): boolean {
@@ -467,5 +579,26 @@ defineExpose({ reload: load, reloadToFirstPage: reload })
   font-size: 13px;
   color: var(--el-text-color-regular);
   line-height: 1.6;
+}
+.app-roles-list {
+  min-height: 80px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.app-role-item {
+  display: flex;
+  align-items: center;
+}
+.app-role-code {
+  margin-left: 6px;
+  font-size: 12px;
+  color: var(--el-text-color-secondary);
+}
+.app-role-empty {
+  color: var(--el-text-color-secondary);
+  font-size: 13px;
+  padding: 16px 0;
+  text-align: center;
 }
 </style>

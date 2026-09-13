@@ -297,4 +297,19 @@ export interface UserManagementConfig {
   realmId?: string
   /** 新建用户时的默认角色，默认取 `roles[0]` 之外的最后一个（通常是最低权限） */
   defaultRole?: string
+  /**
+   * 应用角色绑定（Phase 4 双视角·用户×系统）：配置后操作列出现「应用角色」按钮，
+   * 弹窗内勾选该用户在本应用 client 级角色的绑定（sys_user_role）。
+   * 不配置则不显示（向后兼容既有宿主）。
+   */
+  appRoles?: {
+    /** auth-center 根（如 https://auth.marschat.online），组件拼 /admin/... */
+    baseUrl: string
+    /** 本应用 client_id（绑定作用域） */
+    clientId: string
+    /** 返回当前 Bearer token（不含 "Bearer " 前缀） */
+    getToken: () => string | null
+    /** 401 回调（宿主做静默重授权），可选 */
+    onUnauthorized?: () => void
+  }
 }
