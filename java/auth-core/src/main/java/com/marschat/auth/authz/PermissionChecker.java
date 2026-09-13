@@ -46,7 +46,8 @@ public class PermissionChecker {
         this.failOpen = failOpen;
     }
 
-    private record CacheEntry(long fetchedAt, JsonNode data) {}
+    /** 缓存条目：token 维度隔离（2.1.5 修复——单例 checker 的全局单份缓存曾致跨用户串权限）。 */
+    private record CacheEntry(long fetchedAt, JsonNode data, String token) {}
 
     /**
      * 判定当前 token 是否拥有所需权限点。
@@ -97,12 +98,12 @@ public class PermissionChecker {
     private JsonNode fetchData(String bearerToken) {
         CacheEntry c = cache;
         long now = System.currentTimeMillis();
-        if (c != null && now - c.fetchedAt < cacheTtlMs) {
+        if (c != null && now - c.fetchedAt < cacheTtlMs && sameToken(c, bearerToken)) {
             return c.data;
         }
         synchronized (this) {
             c = cache;
-            if (c != null && now - c.fetchedAt < cacheTtlMs) {
+            if (c != null && now - c.fetchedAt < cacheTtlMs && sameToken(c, bearerToken)) {
                 return c.data;
             }
             if (bearerToken == null || bearerToken.isBlank()) {
@@ -122,13 +123,17 @@ public class PermissionChecker {
                     return null;
                 }
                 JsonNode data = body.path("data");
-                cache = new CacheEntry(now, data);
+                cache = new CacheEntry(now, data, bearerToken);
                 return data;
             } catch (Exception e) {
                 log.warn("拉取权限异常（fail-open={}）: {}", failOpen, e.getMessage());
                 return null;
             }
         }
+    }
+
+    private static boolean sameToken(CacheEntry c, String bearerToken) {
+        return c.token != null && c.token.equals(bearerToken == null ? "" : bearerToken);
     }
 
     /** 当前缓存副本的只读视图（供调试/观测）。 */
