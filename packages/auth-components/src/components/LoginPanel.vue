@@ -12,9 +12,22 @@
         <p v-if="config.subtitle" class="login-subtitle">{{ config.subtitle }}</p>
       </div>
 
-      <!-- 独立登录表单（showLocalLogin !== false 时渲染；纯 SSO 应用如 kb-ops 后端
+      <!-- 登录方式切换（账密 / 邮箱验证码；两种都启用时才出现） -->
+      <div v-if="showModeSwitch" class="login-mode-switch">
+        <a
+          :class="['mode-link', { active: loginMode === 'password' }]"
+          @click.prevent="switchLoginMode('password')"
+        >{{ labels.passwordTabText }}</a>
+        <span class="mode-sep">/</span>
+        <a
+          :class="['mode-link', { active: loginMode === 'mail' }]"
+          @click.prevent="switchLoginMode('mail')"
+        >{{ labels.mailTabText }}</a>
+      </div>
+
+      <!-- 独立登录表单·账号密码（showLocalLogin !== false 时渲染；纯 SSO 应用如 kb-ops 后端
            无本地登录端点，应传 false 隐藏，避免展示一个必然 403 的死表单） -->
-      <template v-if="config.showLocalLogin !== false">
+      <template v-if="showPasswordForm">
       <el-form
         ref="formRef"
         :model="form"
@@ -60,9 +73,58 @@
       </el-form>
       </template>
 
+      <!-- 独立登录表单·邮箱验证码（showMailLogin === true 时渲染） -->
+      <template v-if="showMailForm">
+        <el-form
+          ref="mailFormRef"
+          :model="mailForm"
+          :rules="mailRules"
+          label-width="0"
+          size="large"
+          @keyup.enter="handleMailLogin"
+        >
+          <el-form-item prop="email">
+            <el-input
+              v-model="mailForm.email"
+              :placeholder="labels.emailPlaceholder"
+              :prefix-icon="Message"
+            />
+          </el-form-item>
+          <el-form-item prop="code">
+            <div class="code-input-wrapper">
+              <el-input
+                v-model="mailForm.code"
+                :placeholder="labels.codePlaceholder"
+                :prefix-icon="Key"
+                maxlength="6"
+              />
+              <el-button
+                type="primary"
+                :disabled="mailCountdown > 0"
+                :loading="mailCodeSending"
+                class="resend-btn"
+                @click="handleSendMailLoginCode"
+              >
+                {{ mailCountdown > 0 ? `${mailCountdown}s` : labels.sendCodeText }}
+              </el-button>
+            </div>
+          </el-form-item>
+          <el-form-item>
+            <el-button
+              type="primary"
+              :loading="mailLoading"
+              class="login-btn"
+              @click="handleMailLogin"
+            >
+              {{ labels.mailLoginButtonText }}
+            </el-button>
+          </el-form-item>
+        </el-form>
+      </template>
+
       <!-- SSO 分隔线与按钮 -->
       <template v-if="config.showSso !== false && config.ssoConfig">
-        <el-divider v-if="config.showLocalLogin !== false" content-position="center">{{ labels.dividerText }}</el-divider>
+        <el-divider v-if="showLocalSection" content-position="center">{{ labels.dividerText }}</el-divider>
         <el-button
           type="success"
           class="sso-btn"
@@ -225,6 +287,8 @@ import type {
   LoginPanelConfig,
   LoginPanelLabels,
   ForgotPasswordStep,
+  LoginMode,
+  MailLoginResult,
   SendCodeResponse,
 } from '../types'
 import { startSsoLogin } from '../utils/sso'
@@ -235,6 +299,7 @@ const props = defineProps<{
 
 const emit = defineEmits<{
   (e: 'login', credentials: { username: string; password: string }): void
+  (e: 'mail-login', payload: { email: string; code: string; result?: MailLoginResult }): void
   (e: 'sso-login'): void
   (e: 'password-reset'): void
 }>()
@@ -249,6 +314,9 @@ const defaultLabels: Required<LoginPanelLabels> = {
   dividerText: '或',
   successMessage: '登录成功',
   loginFailedMessage: '登录失败，请检查用户名或密码',
+  passwordTabText: '账号密码登录',
+  mailTabText: '邮箱验证码登录',
+  mailLoginButtonText: '登 录',
   ssoNotConfiguredMessage: 'SSO 未配置',
   ssoFailedMessage: 'SSO 登录发起失败',
   // 忘记密码相关文案
@@ -293,6 +361,136 @@ const form = reactive({
 const rules: FormRules = {
   username: [{ required: true, message: '请输入用户名', trigger: 'blur' }],
   password: [{ required: true, message: '请输入密码', trigger: 'blur' }],
+}
+
+// ========== 登录方式（账密 / 邮箱验证码）==========
+/**
+ * 方式展示矩阵（与 config 语义一致）：
+ * - 两者都启用      → 渲染方式切换，默认账密
+ * - 仅 showMailLogin → 只渲染邮箱验证码表单（showLocalLogin=false 的纯 SSO 应用可用它保留中心账号登录）
+ * - 仅 showLocalLogin（默认）→ 只渲染账密表单（历史行为，零回归）
+ */
+const loginMode = ref<LoginMode>('password')
+const mailLoginEnabled = computed(() => props.config.showMailLogin === true)
+const showModeSwitch = computed(() => props.config.showLocalLogin !== false && mailLoginEnabled.value)
+const showPasswordForm = computed(
+  () => props.config.showLocalLogin !== false && (!mailLoginEnabled.value || loginMode.value === 'password'),
+)
+const showMailForm = computed(
+  () => mailLoginEnabled.value && (props.config.showLocalLogin === false || loginMode.value === 'mail'),
+)
+/** 本地区块（账密或邮箱码）是否可见——决定 SSO 上方是否画分隔线 */
+const showLocalSection = computed(() => showPasswordForm.value || showMailForm.value)
+
+function switchLoginMode(mode: LoginMode) {
+  loginMode.value = mode
+  error.value = null
+}
+
+// ========== 邮箱验证码登录 ==========
+const mailFormRef = ref<FormInstance>()
+const mailLoading = ref(false)
+const mailCodeSending = ref(false)
+const mailCountdown = ref(0)
+let mailCountdownTimer: ReturnType<typeof setInterval> | null = null
+
+const mailForm = reactive({
+  email: '',
+  code: '',
+})
+
+const mailRules: FormRules = {
+  email: [
+    { required: true, message: '请输入邮箱', trigger: 'blur' },
+    { type: 'email', message: '请输入正确的邮箱格式', trigger: 'blur' },
+  ],
+  code: [
+    { required: true, message: '请输入验证码', trigger: 'blur' },
+    { len: 6, message: '验证码为6位数字', trigger: 'blur' },
+  ],
+}
+
+function startMailCountdown(seconds: number) {
+  mailCountdown.value = seconds
+  stopMailCountdown()
+  mailCountdownTimer = setInterval(() => {
+    mailCountdown.value--
+    if (mailCountdown.value <= 0) {
+      stopMailCountdown()
+    }
+  }, 1000)
+}
+
+function stopMailCountdown() {
+  if (mailCountdownTimer) {
+    clearInterval(mailCountdownTimer)
+    mailCountdownTimer = null
+  }
+  mailCountdown.value = 0
+}
+
+/** 邮箱格式校验（不依赖表单实例，避免 validateField 的 API 差异） */
+const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/
+
+/** 发送邮箱验证码（默认打 `/mail-login/send-code`，可由 onSendMailLoginCode 覆盖） */
+async function handleSendMailLoginCode() {
+  if (!mailForm.email || !EMAIL_RE.test(mailForm.email)) {
+    error.value = '请输入正确的邮箱'
+    return
+  }
+
+  mailCodeSending.value = true
+  error.value = null
+
+  try {
+    if (props.config.onSendMailLoginCode) {
+      const res = await props.config.onSendMailLoginCode(mailForm.email)
+      if (!res.success) {
+        error.value = res.message || '发送验证码失败'
+        return
+      }
+      startMailCountdown(res.expiresIn || 60)
+    } else {
+      await callAuthApi(authApiUrl('/mail-login/send-code'), { email: mailForm.email })
+      startMailCountdown(60)
+    }
+    ElMessage.success('验证码已发送')
+  } catch (e: any) {
+    error.value = e?.message || '发送验证码失败'
+  } finally {
+    mailCodeSending.value = false
+  }
+}
+
+/** 邮箱验证码登录（默认打 `/mail-login`，可由 onMailLogin 覆盖） */
+async function handleMailLogin() {
+  const valid = await mailFormRef.value?.validate().catch(() => false)
+  if (!valid) return
+
+  mailLoading.value = true
+  error.value = null
+
+  try {
+    let result: MailLoginResult | undefined
+    if (props.config.onMailLogin) {
+      result = (await props.config.onMailLogin({
+        email: mailForm.email,
+        code: mailForm.code,
+      })) as MailLoginResult | undefined
+      ElMessage.success(labels.value.successMessage)
+    } else {
+      result = await callAuthApi<MailLoginResult>(authApiUrl('/mail-login'), {
+        email: mailForm.email,
+        code: mailForm.code,
+      })
+    }
+    // 事件模式：token 落地由应用负责（与账密登录的 emit('login') 同构）
+    emit('mail-login', { email: mailForm.email, code: mailForm.code, result })
+  } catch (e: any) {
+    error.value = e?.message || labels.value.loginFailedMessage
+  } finally {
+    mailLoading.value = false
+  }
 }
 
 // ========== 忘记密码状态 ==========
@@ -647,6 +845,37 @@ defineExpose({
 
 .sso-btn {
   width: 100%;
+}
+
+.login-mode-switch {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0 0 16px;
+  font-size: 13px;
+
+  .mode-link {
+    color: #909399;
+    cursor: pointer;
+    text-decoration: none;
+    padding-bottom: 2px;
+    border-bottom: 2px solid transparent;
+    transition: color 0.16s ease, border-color 0.16s ease;
+
+    &.active {
+      color: var(--accent, #409eff);
+      border-bottom-color: var(--accent, #409eff);
+      font-weight: 600;
+    }
+
+    &:hover {
+      color: var(--accent, #409eff);
+    }
+  }
+
+  .mode-sep {
+    color: #dcdfe6;
+  }
 }
 
 .forgot-line {

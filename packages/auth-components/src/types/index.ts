@@ -122,6 +122,25 @@ export interface ResetPasswordRequest {
   newPassword: string
 }
 
+/** 邮箱验证码登录成功返回（auth-center /auth/mail-login 的 data 段） */
+export interface MailLoginResult {
+  accessToken: string
+  refreshToken?: string
+  expiresIn?: number
+  /** 用户档案（auth-center User 实体） */
+  user?: {
+    id?: number
+    username?: string
+    nickname?: string
+    email?: string
+    role?: string
+    [k: string]: unknown
+  }
+}
+
+/** 登录方式（组件内切换） */
+export type LoginMode = 'password' | 'mail'
+
 /** 登录面板配置 */
 export interface LoginPanelConfig {
   /** 应用名称 */
@@ -140,6 +159,27 @@ export interface LoginPanelConfig {
    * 否则展示一个提交必 403 的死表单（2026-09-13 kb-ops 浏览器实测）。
    */
   showLocalLogin?: boolean
+  /**
+   * 是否显示「邮箱验证码登录」方式，**默认 false**。
+   *
+   * 平台最低登录要求 = 账密 + 邮箱验证码 + 忘记密码（邮箱码找回），本开关用于启用第二种。
+   * 开启前提：应用的 `authApiBase` 能到达 auth-center 的
+   * `POST /auth/mail-login/send-code` 与 `POST /auth/mail-login`（直连或后端代理）。
+   *
+   * 与 `showLocalLogin` 的组合语义：
+   * - 两者都 true  → 顶部出现「账号密码 / 邮箱验证码」切换
+   * - 仅 mail true → 只渲染邮箱验证码表单（如纯 SSO 应用想保留中心账号登录）
+   * - 仅 password  → 只渲染账密表单（历史行为，零回归）
+   */
+  showMailLogin?: boolean
+  /**
+   * 邮箱验证码登录执行器（可选）。
+   * 提供则由应用负责请求与 token 落地；未提供时组件直连
+   * `${authApiBase}/mail-login` 并把返回结果随 `mail-login` 事件抛出。
+   */
+  onMailLogin?: (payload: { email: string; code: string }) => Promise<MailLoginResult | void>
+  /** 发送邮箱验证码回调（可选，覆盖默认的 `/mail-login/send-code` 请求） */
+  onSendMailLoginCode?: (email: string) => Promise<SendCodeResponse>
   /** 是否显示忘记密码链接，默认 true */
   showForgotPassword?: boolean
   /**
@@ -221,6 +261,12 @@ export interface LoginPanelLabels {
   successMessage?: string
   /** 登录失败提示 */
   loginFailedMessage?: string
+  /** 账号密码方式切换标签 */
+  passwordTabText?: string
+  /** 邮箱验证码方式切换标签 */
+  mailTabText?: string
+  /** 邮箱验证码登录按钮文字 */
+  mailLoginButtonText?: string
   /** SSO 未配置提示 */
   ssoNotConfiguredMessage?: string
   /** SSO 失败提示 */

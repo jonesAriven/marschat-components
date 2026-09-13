@@ -42,6 +42,7 @@
         <LoginPanel
           :config="config"
           @login="(c) => emit('login', c)"
+          @mail-login="(p) => emit('mail-login', p)"
           @sso-login="emit('sso-login')"
           @password-reset="emit('password-reset')"
         />
@@ -67,6 +68,7 @@ const props = withDefaults(
 
 const emit = defineEmits<{
   (e: 'login', credentials: { username: string; password: string }): void
+  (e: 'mail-login', payload: { email: string; code: string; result?: unknown }): void
   (e: 'sso-login'): void
   (e: 'password-reset'): void
 }>()
