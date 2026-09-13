@@ -53,13 +53,6 @@
           />
         </el-form-item>
 
-        <!-- 忘记密码链接 -->
-        <div v-if="config.showForgotPassword !== false" class="forgot-line">
-          <a class="forgot-link" @click.prevent="startForgotPassword">
-            {{ labels.forgotPasswordText }}
-          </a>
-        </div>
-
         <el-form-item>
           <el-button
             type="primary"
@@ -121,6 +114,16 @@
           </el-form-item>
         </el-form>
       </template>
+
+      <!-- 忘记密码入口（账密 / 邮箱码任一方式可见时即展示）。
+           ⚠️ 必须放在两种表单**之外**：早前嵌在账密表单内部，导致纯邮箱码应用
+           （showLocalLogin=false，如 kb-ops）会连「忘记密码」一起被隐藏
+           —— 2026-09-14 真浏览器实测 kb-ops 登录页丢失该入口后修复。 -->
+      <div v-if="showLocalSection && config.showForgotPassword !== false" class="forgot-line">
+        <a class="forgot-link" @click.prevent="startForgotPassword">
+          {{ labels.forgotPasswordText }}
+        </a>
+      </div>
 
       <!-- SSO 分隔线与按钮 -->
       <template v-if="config.showSso !== false && config.ssoConfig">
