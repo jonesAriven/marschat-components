@@ -16,7 +16,13 @@ export interface MenuItemDef {
   key: string
   title: string
   icon?: string
+  /** 静态 path；动态 path 场景与 {@link pathFn} 二选一。 */
   path?: string
+  /**
+   * 动态 path 生成器（kb-web 的 /space/${currentSpace.id} 类场景）。
+   * 渲染层 `:index` 取 `pathFn?.() ?? path`；visibleFn 为 false 时整项隐藏。
+   */
+  pathFn?: () => string
   /** 分组标题（有值 = 分组头）。 */
   group?: string
   order?: number
@@ -24,6 +30,15 @@ export interface MenuItemDef {
   hidden?: boolean
   /** 跳过权限校验（如工作台/设置等基础项）。 */
   skipPerm?: boolean
+  /**
+   * 运行时可见性函数（依赖 store 等运行时状态，如「当前空间存在才显示」）。
+   * 返回 false = 整项隐藏（与权限过滤正交；skipPerm 不影响本函数）。
+   */
+  visibleFn?: () => boolean
+  /** 运行时禁用（模块健康度类，如 kb-knowledge 不可用）——灰化不禁用隐藏。 */
+  disabledFn?: () => boolean
+  /** 禁用原因（tooltip 文案），配合 disabledFn。 */
+  disabledReasonFn?: () => string
   children?: MenuItemDef[]
 }
 
@@ -32,6 +47,9 @@ export function useMenus(opts: UsePermissionsOptions, menus: MenuItemDef[] | Ref
   const source = computed(() => (Array.isArray(menus) ? menus : menus.value))
 
   const filterOne = (m: MenuItemDef): MenuItemDef | null => {
+    if (m.visibleFn && !m.visibleFn()) {
+      return null
+    }
     if (m.skipPerm || !state.value.configured) {
       return m
     }
