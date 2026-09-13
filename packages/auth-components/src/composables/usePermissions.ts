@@ -102,7 +102,10 @@ export function hasPermission(opts: UsePermissionsOptions, code: string): boolea
   if (opts.adminBypass !== false && s.platformRoles.some(isAdminRole)) {
     return true
   }
-  const full = code.indexOf(':') >= 0 ? code : `${opts.clientId}:${code}`
+  // 0.6.6 语义修正：「含冒号即原样使用」会让 type:code 半码（如 permCode 漏拼或手写
+  // 'menu:users'）永不匹配下发集合（<client>:menu:users）。改为不以本应用 client 前缀
+  // 开头则补前缀——全码原样、半码/裸 code 均正确补全（与 auth-core qualify 同款）。
+  const full = code.startsWith(`${opts.clientId}:`) ? code : `${opts.clientId}:${code}`
   return s.permissions.includes(full)
 }
 

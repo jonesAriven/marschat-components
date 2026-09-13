@@ -84,8 +84,14 @@ public class PermissionChecker {
     }
 
     /** 权限点补全：{@code api:deploy:create} → {@code <clientId>:api:deploy:create}。 */
+    /**
+     * 权限点补全：{@code menu:dashboard} → {@code <clientId>:menu:dashboard}（2.1.4 语义修正）。
+     * 旧实现「含冒号即原样使用」——注解写 {@code "menu:xxx"}（type:code 两段）时永不匹配下发集合
+     * （{@code <client>:menu:xxx}），登录的正常用户全部 403（超管恒放行掩盖）。改为
+     * 「不以本应用 client 前缀开头则补前缀」：全码原样、type:code 半码与裸 code 均正确补全。
+     */
     private String qualify(String code) {
-        return code.indexOf(':') >= 0 ? code : clientId + ":" + code;
+        return code.startsWith(clientId + ":") ? code : clientId + ":" + code;
     }
 
     private JsonNode fetchData(String bearerToken) {
