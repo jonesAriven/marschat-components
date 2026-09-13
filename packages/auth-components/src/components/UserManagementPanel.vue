@@ -301,11 +301,12 @@ async function openAppRoles(row: AdminUserItem): Promise<void> {
   const clientId = props.config.appRoles!.clientId
   try {
     const [allRoles, boundIds] = await Promise.all([
-      appRolesApi<Array<{ id: number; scope: string; clientId: string | null; code: string; name: string }>>('/roles'),
+      appRolesApi<Array<Record<string, any>>>('/roles'),
       appRolesApi<number[]>(`/users/${row.id}/client-roles?client=${encodeURIComponent(clientId)}`),
     ])
+    // ⚠️ /roles 由 queryForList 直出 snake_case（client_id）——双键兼容（同 0.6.5 parent_id 教训）
     appRoleOptions.value = allRoles
-      .filter((r) => r.scope === 'client' && r.clientId === clientId)
+      .filter((r) => r.scope === 'client' && (r.client_id ?? r.clientId) === clientId)
       .map((r) => ({ id: r.id, code: r.code, name: r.name, checked: boundIds.includes(r.id) }))
   } catch (e) {
     ElMessage.error(errMsg(e))
