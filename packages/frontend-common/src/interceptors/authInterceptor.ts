@@ -9,6 +9,8 @@
 
 import { isOidcToken, refreshOidcToken, clearTokens, getToken, getTokenSource } from '../request'
 import type { SsoConfig } from '../request'
+// SPA 部署 base：跳登录页必须带上（写死根相对 '/login' 会在子路径部署下 404）
+import { appPath } from '../appBase'
 
 export interface AuthInterceptorOptions {
   /** SSO 配置（用于 OIDC token 刷新） */
