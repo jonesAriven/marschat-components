@@ -14,6 +14,24 @@ export { default as UserManagementPanel } from './components/UserManagementPanel
 // Phase 4：菜单授权面板（角色 × 应用菜单）
 export { default as MenuPermissionPanel } from './components/MenuPermissionPanel.vue'
 export type { MenuPermissionConfig } from './components/MenuPermissionPanel.vue'
+// Phase 7：账号映射管理面板（统一身份 ↔ 各系统本地账号）
+export { default as AccountMappingPanel } from './components/AccountMappingPanel.vue'
+export {
+  createAccountMappingClient,
+  createAccountMappingUserSearch,
+  AccountMappingError,
+} from './utils/accountMapping'
+export type {
+  AccountMappingClient,
+  AccountMappingConfig,
+  AccountMappingItem,
+  AccountMappingUserItem,
+  AccountMappingSummaryItem,
+  MappingPageQuery,
+  MappingPageResult,
+  CenterUserOption,
+  CreateAccountMappingClientOptions,
+} from './utils/accountMapping'
 // Phase 2：RBAC 权限门
 export { default as PermissionGate } from './components/PermissionGate.vue'
 
