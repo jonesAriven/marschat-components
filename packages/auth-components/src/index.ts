@@ -32,6 +32,18 @@ export type {
   CenterUserOption,
   CreateAccountMappingClientOptions,
 } from './utils/accountMapping'
+// Phase 9 / G1：用户级菜单减法面板（角色上限内做减法，永不越权新增）
+export { default as UserMenuOverridePanel } from './components/UserMenuOverridePanel.vue'
+export {
+  createUserMenuOverrideClient,
+  UserMenuOverrideError,
+} from './utils/userMenuOverride'
+export type {
+  UserMenuOverrideClient,
+  UserMenuOverrideConfig,
+  MenuPermissionNode,
+  CreateUserMenuOverrideClientOptions,
+} from './utils/userMenuOverride'
 // Phase 8：跨应用授权矩阵（中心侧「哪些账号有哪些系统的权限」一屏总览）
 export { default as CrossAppAuthPanel } from './components/CrossAppAuthPanel.vue'
 export {

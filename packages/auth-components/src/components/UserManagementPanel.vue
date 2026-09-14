@@ -97,6 +97,20 @@
               {{ isAppScope ? '本系统角色' : '应用角色' }}
             </el-button>
             <!--
+              用户级菜单减法（Phase 9 / G1）：只在「本系统用户」语义下可用 ——
+              app 作用域，或宿主显式提供了 menuOverrides.clientId 的平台面板。
+              取消勾选 = 减法，永不越权新增（可在角色上限内隐藏菜单）。
+            -->
+            <el-button
+              v-if="showMenuOverride"
+              link
+              type="primary"
+              size="small"
+              @click="openMenuOverride(row)"
+            >
+              菜单权限
+            </el-button>
+            <!--
               应用作用域下**不提供删除**：删除的是「统一身份」，属中心职责。
               应用侧对应的动作是「移出本系统」= 解绑该用户在本应用的全部角色（身份保留）。
             -->
@@ -223,6 +237,13 @@
       </template>
     </el-dialog>
 
+    <!-- 用户级菜单减法（Phase 9 / G1 · 角色上限内做减法） -->
+    <UserMenuOverridePanel
+      v-if="menuOverrideConfig"
+      v-model:visible="menuOverrideVisible"
+      :config="menuOverrideConfig"
+    />
+
     <!-- 添加已有用户（仅应用作用域）：从全平台统一身份池挑选，加入本系统 -->
     <el-dialog
       v-model="addVisible"
@@ -294,6 +315,8 @@ import { computed, reactive, ref, onMounted } from 'vue'
 import type { FormInstance, FormRules } from 'element-plus'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { Search } from '@element-plus/icons-vue'
+import UserMenuOverridePanel from './UserMenuOverridePanel.vue'
+import type { UserMenuOverrideConfig } from '../utils/userMenuOverride'
 import type {
   AdminUserItem,
   UserManagementConfig,
@@ -332,8 +355,50 @@ const appDisplayName = computed(() =>
     ? (authScope.value as { mode: 'app'; clientId: string; appName?: string }).appName || appClientId.value
     : ''
 )
-/** 操作列宽度随可用按钮数变化（app 模式：编辑/重置密码/本系统角色/移出本系统） */
-const opColumnWidth = computed(() => (isAppScope.value ? 280 : props.config.appRoles ? 300 : 240))
+
+// ---------------- 用户级菜单减法（Phase 9 / G1 · cfg.menuOverrides 配置后启用） ----------------
+/**
+ * 生效的 client_id：
+ * - `scope.mode === 'app'` → 取 `scope.clientId`（本系统用户语义）；
+ * - 平台作用域 → 取 `cfg.menuOverrides.clientId`（宿主显式指定某应用）。
+ * 两者都没有时不显示「菜单权限」按钮。
+ */
+const menuOverrideClientId = computed(() => {
+  const mo = props.config.menuOverrides
+  if (!mo) return ''
+  if (mo.clientId) return mo.clientId
+  return isAppScope.value ? appClientId.value : ''
+})
+/** 是否显示「菜单权限」按钮 */
+const showMenuOverride = computed(() => !!props.config.menuOverrides && !!menuOverrideClientId.value)
+
+/** 操作列宽度随可用按钮数变化（app 模式：编辑/重置密码/本系统角色/菜单权限/移出本系统） */
+const opColumnWidth = computed(() => {
+  let w = isAppScope.value ? 280 : 240
+  if (!isAppScope.value && props.config.appRoles) w += 60
+  if (menuOverrideClientId.value) w += 60
+  return w
+})
+
+const menuOverrideVisible = ref(false)
+const menuOverrideTarget = ref<AdminUserItem | null>(null)
+const menuOverrideConfig = computed<UserMenuOverrideConfig | null>(() => {
+  const mo = props.config.menuOverrides
+  const row = menuOverrideTarget.value
+  if (!mo || !row || !menuOverrideClientId.value) return null
+  return {
+    client: mo.client,
+    clientId: menuOverrideClientId.value,
+    appName: mo.appName || appDisplayName.value || menuOverrideClientId.value,
+    userId: row.id,
+    username: row.username,
+  }
+})
+
+function openMenuOverride(row: AdminUserItem): void {
+  menuOverrideTarget.value = row
+  menuOverrideVisible.value = true
+}
 
 /** 默认角色选项：最低权限放最后，新建时默认选它 */
 const roleOptions = computed(

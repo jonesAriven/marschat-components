@@ -21,6 +21,8 @@
  * 统一返回包装：`{ code:200, message:'success', data:<T>, traceId }`。
  */
 
+import type { UserMenuOverrideClient } from './userMenuOverride'
+
 /** 用户条目（与 auth-center `User` 实体字段对齐） */
 export interface AdminUserItem {
   id: number
@@ -356,5 +358,20 @@ export interface UserManagementConfig {
     getToken: () => string | null
     /** 401 回调（宿主做静默重授权），可选 */
     onUnauthorized?: () => void
+  }
+  /**
+   * 用户级菜单减法（Phase 9 / G1）：配置后操作列出现「菜单权限」按钮，弹窗内展示
+   * 「角色已授权菜单」，取消勾选即为减法（**只能在角色上限内做减法，永不新增**）。
+   *
+   * 作用域规则：`scope.mode === 'app'` 时缺省用 `scope.clientId`；平台作用域下
+   * 必须**显式**传 `clientId`（否则不显示该按钮，避免「平台用户 × 某应用菜单」语义不清）。
+   */
+  menuOverrides?: {
+    /** 数据源（`createUserMenuOverrideClient(...)` 产物） */
+    client: UserMenuOverrideClient
+    /** 应用 client_id；缺省取 `scope.clientId`（仅 app 作用域） */
+    clientId?: string
+    /** 应用展示名（对话框标题），缺省用 clientId */
+    appName?: string
   }
 }
