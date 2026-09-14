@@ -193,6 +193,16 @@ pnpm publish
 2. 添加 `pom.xml`（groupId 为 `com.marschat`）
 3. 更新 `scripts/build-all.ps1` 构建列表
 
+## 📚 文档
+
+| 文档 | 内容 |
+|------|------|
+| **[docs/INTEGRATION-GUIDE.md](./docs/INTEGRATION-GUIDE.md)** | 🔥 **自建系统接入指南（从这里开始）**：注册应用 → 最小接入 → 权限体系 → 可选能力 → 15 条踩坑铁律 → 验收清单 |
+| [docs/APP-UPGRADE-GUIDE.md](./docs/APP-UPGRADE-GUIDE.md) | 存量应用升级指南（0.1.0 时期，历史参考） |
+| [docs/SSO-IMPLEMENTATION-SUMMARY.md](./docs/SSO-IMPLEMENTATION-SUMMARY.md) | SSO 实施总结 |
+| [docs/ADR-SSO-Cookie-Domain-Sharing.md](./docs/ADR-SSO-Cookie-Domain-Sharing.md) | SSO Cookie 共享方案决策 |
+| [docs/AUTH-CENTER-COOKIE-GUIDE.md](./docs/AUTH-CENTER-COOKIE-GUIDE.md) | auth-center Cookie 配置 |
+
 ## 📄 License
 
 MIT
