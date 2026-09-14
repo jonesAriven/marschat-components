@@ -652,15 +652,26 @@ const addSelectedIds = ref<number[]>([])
 const defaultAppRoleId = ref<number | null>(null)
 const defaultAppRoleName = ref('')
 
-/** 读取本应用的 client 级角色，默认取第一个作为「加入即授予」的角色 */
+/**
+ * 读取本应用的 client 级角色，选定「加入本系统即授予」的**默认角色**。
+ *
+ * 🔴 必须取**最低权限**的那个角色。原实现取 `mine[0]`（`/admin/roles` 按 id 升序，
+ * 而「应用管理员」是最先创建的角色）→ 等于「把一个人加进系统就默认给他管理员」，
+ * **权限过宽**。2026-09-14 由授权审计日志实测发现
+ * （`设置用户 probeuser 在应用 marschat-portal 的角色；变更前: 无 → 变更后: admin`）。
+ */
 async function loadAppRoleDefs(): Promise<void> {
   const all = await appRolesApi<Array<Record<string, any>>>('/roles')
   // ⚠️ /roles 由 queryForList 直出 snake_case（client_id）—— 双键兼容（同 0.6.5 parent_id 教训）
   const mine = all.filter(
     (r) => r.scope === 'client' && (r.client_id ?? r.clientId) === appClientId.value
   )
-  defaultAppRoleId.value = mine.length ? Number(mine[0].id) : null
-  defaultAppRoleName.value = mine.length ? String(mine[0].name || mine[0].code) : ''
+  const preferred =
+    mine.find((r) => r.code === 'user') ?? // 约定：普通用户 = 最低权限（首选）
+    mine.find((r) => r.code !== 'admin') ?? // 其次：任何非 admin 的角色
+    mine[0] // 兜底：应用只有 admin 一个角色时
+  defaultAppRoleId.value = preferred ? Number(preferred.id) : null
+  defaultAppRoleName.value = preferred ? String(preferred.name || preferred.code) : ''
 }
 
 /** 拉取候选用户（全平台池）+ 本系统当前成员（用于标记「已加入」） */
