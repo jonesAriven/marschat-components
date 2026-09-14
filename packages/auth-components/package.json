@@ -1,6 +1,6 @@
 {
   "name": "@marschat/auth-components",
-  "version": "0.8.2",
+  "version": "0.8.3",
   "description": "MarsChat 统一认证公共组件库 - 账密/邮箱验证码/忘记密码三方式登录、SSO 单点登录、静默免登、统一登出(SLO)、会话监视、双作用域用户管理(平台/本系统)、跨应用授权矩阵、账号映射、RBAC 权限(usePermissions/useMenus/PermissionGate)、OIDC PKCE",
   "type": "module",
   "main": "./dist/marschat-auth-components.es.js",

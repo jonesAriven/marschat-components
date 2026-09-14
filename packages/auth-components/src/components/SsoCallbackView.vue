@@ -6,18 +6,19 @@
     </div>
     <div v-if="error" class="error-box">
       <p>{{ error }}</p>
-      <a class="back-link" href="/login">返回登录页</a>
+      <a class="back-link" :href="loginHref">返回登录页</a>
     </div>
   </div>
 </template>
 
 <script setup lang="ts">
-import { onMounted, ref } from 'vue'
+import { computed, onMounted, ref } from 'vue'
 import { ElMessage } from 'element-plus'
 import { Loading } from '@element-plus/icons-vue'
 import type { SsoConfig } from '../types'
 import { handleSsoCallback } from '../utils/sso'
 import { setToken, getToken, decodeOidcClaims } from '../utils/token'
+import { appPath } from '../utils/appBase'
 
 const props = defineProps<{
   config: SsoConfig
@@ -37,6 +38,15 @@ const emit = defineEmits<{
 }>()
 
 const error = ref<string | null>(null)
+
+/**
+ * 返回登录页的地址（**必须带 SPA base**）。
+ *
+ * 🔴 原实现写死 `<a href="/login">` / `navigateTo('/login')` —— 根相对路径，
+ * 在子路径部署（/kb、/ops、/infra、/portal）下会跳到域名根 `/login` → nginx 404。
+ * 优先用应用注入的 `config.loginUrl`，否则按应用声明的部署 base 拼（见 utils/appBase）。
+ */
+const loginHref = computed(() => props.config.loginUrl || appPath('/login'))
 
 /**
  * 导航到指定路径
@@ -79,9 +89,9 @@ onMounted(async () => {
     }
     emit('error', e)
     
-    // 3秒后自动跳转回登录页
+    // 3秒后自动跳转回登录页（带 SPA base，避免跳到域名根 /login 变 404）
     setTimeout(() => {
-      navigateTo('/login')
+      navigateTo(loginHref.value)
     }, 3000)
   }
 })

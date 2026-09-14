@@ -142,6 +142,24 @@ export interface CreateRequestOptions {
  * })
  * ```
  */
+/**
+ * 本应用的**登录页地址**（自动带 SPA 部署 base）。
+ *
+ * 🔴 为什么不能写死 `/login`（2026-09-14 良哥实测缺陷）：
+ * 这些 SPA 都部署在**子路径**下（`/ops` / `/kb` / `/infra` / `/portal`）。
+ * `window.location.href = marschatLoginUrl()` 是**根相对**路径 → 跳到域名根
+ * `https://kb.marschat.online/login` —— nginx 没有该 location → **404 白页**
+ * （kb-ops 的 401 兜底路径实测踩中，见 ADR §32.11）。
+ *
+ * 修法：应用在入口声明一次部署 base（`window.__MARSCHAT_APP_BASE__ = CONTEXT_PATH`），
+ * 这里据此拼出 `/ops/login` 这类正确地址；未声明时回落 `/login`（行为与修复前一致，零回归）。
+ */
+function marschatLoginUrl(): string {
+  const raw = (window as unknown as { __MARSCHAT_APP_BASE__?: unknown }).__MARSCHAT_APP_BASE__
+  const base = typeof raw === 'string' ? raw.replace(/\/+$/, '') : ''
+  return `${base}/login`
+}
+
 export function createRequest(options: CreateRequestOptions = {}): CreateRequestResult {
   const {
     baseURL = '/api',
@@ -154,7 +172,7 @@ export function createRequest(options: CreateRequestOptions = {}): CreateRequest
     onUnauthorized = () => {
       // 默认：清除 token 并跳转登录
       clearTokens()
-      window.location.href = '/login'
+      window.location.href = marschatLoginUrl()
     },
     ...restOptions
   } = options
@@ -239,7 +257,7 @@ export function createRequest(options: CreateRequestOptions = {}): CreateRequest
               if (result instanceof Promise) return result
             } else {
               clearTokens()
-              window.location.href = '/login'
+              window.location.href = marschatLoginUrl()
             }
           }
         } else {
@@ -249,7 +267,7 @@ export function createRequest(options: CreateRequestOptions = {}): CreateRequest
             if (result instanceof Promise) return result
           } else {
             clearTokens()
-            window.location.href = '/login'
+            window.location.href = marschatLoginUrl()
           }
         }
         return Promise.reject(error)
@@ -317,7 +335,7 @@ export function createRequest(options: CreateRequestOptions = {}): CreateRequest
           if (result instanceof Promise) return result
         } else {
           clearTokens()
-          window.location.href = '/login'
+          window.location.href = marschatLoginUrl()
         }
         return Promise.reject(error)
       }

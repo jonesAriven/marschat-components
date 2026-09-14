@@ -29,6 +29,7 @@
 import type { SsoConfig } from '../types'
 import { probeIdpSession } from './sso'
 import { getToken, clearTokens } from './token'
+import { appPath } from './appBase'
 
 /** 会话监视器配置 */
 export interface SessionWatcherOptions {
@@ -150,7 +151,9 @@ export function createSessionWatcher(
   options: SessionWatcherOptions = {}
 ): SessionWatcher {
   const opts = { ...DEFAULTS, ...options }
-  const loginUrl = options.loginUrl || config.loginUrl || '/login'
+  // ⚠️ 最后兜底不能用根相对 '/login'：子路径部署（/kb、/ops、/infra、/portal）下会跳到
+  //    域名根 /login → nginx 404。改按应用声明的部署 base 拼（见 utils/appBase）。
+  const loginUrl = options.loginUrl || config.loginUrl || appPath('/login')
 
   /**
    * 凭据读取 / 清理 —— 可被应用覆盖（见 `SessionWatcherOptions.getToken` / `clearLocalAuth`）。
