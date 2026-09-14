@@ -151,14 +151,18 @@ npm i @marschat/auth-components@latest --prefer-online   # 代理组有缓存，
 
 ## 4. 后续其他应用接入清单
 
-把"抄登录页"的应用改成统一 `LoginPage`：
+把"抄登录页"的应用改成统一 `LoginPage`（✅ 2026-09-14 复核：6 应用全部已统一，回归实测同一登录壳）：
 
-- [ ] `devtools/mykng/kb-web`
-- [ ] `devtools/kb-ops/kb-ops-web`
-- [ ] `devtools/infra-monitor/infra-monitor-web`
-- [ ] `devtools/portal`
+- [x] `devtools/mykng/kb-web`
+- [x] `devtools/kb-ops/kb-ops-web`
+- [x] `devtools/infra-monitor/infra-monitor-web`
+- [x] `devtools/portal`
+- [x] `cosmic-studio`（启用即为本组件首批用户）
+- [x] `activecode`
 
-统一后，登录视觉/交互改一次组件发版即可全应用生效。
+> 📌 0.3.x 后 `LoginPanelConfig` 新增两个关键开关（接入时按应用形态选择，详见 `LOGIN-PAGE-USAGE.md`）：
+> - `showLocalLogin`（默认 true）—— **纯 SSO 应用（后端无本地登录端点，如 kb-ops）必须传 false**，否则渲染一个提交必 403 的死表单（2026-09-13 浏览器实测）；
+> - `showMailLogin`（默认 false）—— 开启「邮箱验证码登录」方式，需 `authApiBase` 能达 auth-center `POST /auth/mail-login/*`。
 
 ---
 

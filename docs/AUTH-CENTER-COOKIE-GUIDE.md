@@ -1,5 +1,11 @@
 # auth-center 后端 SSO Cookie 设置指南
 
+> ⚠️ **历史方案存档（2026-01-09），实施前必须核对 auth-center 现行代码** ——
+> 终态架构下前端 token 存储为**各应用 localStorage**（`token_kind=oidc`），`token.ts` 的 Cookie 读写默认关闭（`cookie.enabled=false`）；
+> 跨应用共享的核心是 **IdP 会话 Cookie**（auth-center 会话域 `marschat.online`），不是本文的 `sso_access_token` Token Cookie。
+> 本文描述的 `SsoCookieProperties`/`SsoCookieUtil` 是当时的设计稿，auth-center 实际落地形态以仓库现行代码为准。
+> 当前接入口径见 **[INTEGRATION-GUIDE.md](./INTEGRATION-GUIDE.md)**。
+
 ## 概述
 
 为了实现 SSO 跨系统免密访问，auth-center 需要在用户登录成功后，通过 `Set-Cookie` 响应头设置 **Domain 级别** 的 Cookie，使所有子域（`.marschat.online`）都能共享该 Token。

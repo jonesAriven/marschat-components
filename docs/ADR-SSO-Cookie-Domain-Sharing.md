@@ -1,6 +1,18 @@
 # ADR-SSO-001: SSO 跨系统 Cookie Domain 共享方案
 
-**状态**: 已采纳
+> ⚠️ **状态已更新（2026-09-14 复核）**：本 ADR 的「共享 Token Cookie」机制**未成为终态**，已被取代：
+>
+> - **终态跨应用共享 = IdP 会话 Cookie**（auth-center 会话，`Domain=marschat.online; Secure`）+ OIDC `authorization_code + PKCE`。
+>   各应用凭 IdP 会话走**静默免登 / 静默重授权**拿到自己的 token，存各自 localStorage（`token_kind=oidc`）。
+> - 前端 `token.ts` 的 `sso_access_token` Cookie 读写**默认关闭**（`cookie.enabled=false`，仅 localStorage）；
+>   且该 Cookie 由后端 `Set-Cookie` 写（HttpOnly），**前端 JS 无法写 HttpOnly Cookie**（下文 §2.3/Step 2 的示例有此技术错误）。
+> - 精神上保留的部分：跨子域共享确用 `.marschat.online` 域 Cookie 实现——但共享的是 **IdP 会话**，不是 access_token 本体。
+>
+> 当前接入口径以 **[INTEGRATION-GUIDE.md](./INTEGRATION-GUIDE.md)** 为准；本文其余部分作为当时的决策推演留存。
+> 另勘误两处技术错误：① `Set-Cookie` 示例同时出现 `SameSite=Lax` 与 `SameSite=None`（互斥，不能共存）；
+> ② 表格「SameSite=Lax 允许跨域 POST」说法错误——Lax 跨站 POST 不携带 Cookie，需要 `None`（且必须配合 `Secure`）。
+
+**状态**: ~~已采纳~~ → **已部分取代**（共享 IdP 会话 Cookie 的思路并入终态；共享 access_token Cookie 的机制被 OIDC PKCE + localStorage 取代）
 **日期**: 2026-01-09
 **决策者**: DevTeam
 **关联问题**: ISS-003

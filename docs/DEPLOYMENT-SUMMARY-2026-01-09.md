@@ -1,7 +1,11 @@
 # SSO + 忘记密码功能 - 部署实施总结
 
+> ⚠️ **历史快照（2026-01-09）** —— 记录当时「SSO Cookie 方案 + 忘记密码」的部署动作，事项均已完结。
+> 文中 auth-center `SsoCookieUtil`/`sso.cookie.*` 等为当时方案；终态架构（OIDC PKCE + IdP 会话 Cookie + localStorage 存票）
+> 以 **[INTEGRATION-GUIDE.md](./INTEGRATION-GUIDE.md)** 与 auth-center 现行代码为准。
+
 **日期**: 2026-01-09  
-**状态**: ✅ 代码开发完成，待部署测试
+**状态**: ✅ 代码开发完成，待部署测试（✅ 已完结，6 应用全部接入并多轮回归通过）
 
 ---
 

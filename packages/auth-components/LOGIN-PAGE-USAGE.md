@@ -73,11 +73,16 @@ function handlePasswordReset() { /* 重置成功回调 */ }
 | `layout` | `'split' \| 'centered'` | `split` | 左品牌右表单 / 居中卡片 |
 | `showSso` | boolean | true | 是否显示 SSO 按钮 |
 | `showForgotPassword` | boolean | true | 是否显示忘记密码 |
+| `showLocalLogin` | boolean | true | 是否显示本地账号密码表单。**纯 SSO 应用（后端无本地登录端点，如 kb-ops）必须传 false**——否则渲染一个提交必 403 的死表单（2026-09-13 浏览器实测） |
+| `showMailLogin` | boolean | false | 是否显示「邮箱验证码登录」方式。开启前提：应用 `authApiBase` 能达 auth-center `POST /auth/mail-login/send-code` 与 `POST /auth/mail-login`。与 `showLocalLogin` 组合语义：都 true → 顶部出现「账号密码 / 邮箱验证码」切换；仅 mail → 只渲染邮箱码表单；仅 password → 只渲染账密表单 |
 | `ssoConfig` | SsoConfig | — | OIDC 配置 |
 | `labels` | LoginPanelLabels | — | 全部文案可覆盖 |
 | `brand` | `{ name, tagline, highlights[], gradient }` | — | 左栏品牌区（split 布局） |
 | `footerText` | string | `© MarsChat · 统一认证` | 品牌区底部文字 |
 | `onLogin/onSsoLogin/onSendCode/onVerifyCode/onResetPassword` | fn | — | 覆盖默认实现 |
+
+> 📌 完整字段以 `src/types/index.ts` 的 `LoginPageConfig` 为权威（0.8.x 仍持续演进，本文档列的是接入必知子集）。
+> 全新系统从零接入请先读 **[docs/INTEGRATION-GUIDE.md](../../docs/INTEGRATION-GUIDE.md)**（注册应用 → 薄适配层 → 权限体系 → 验收清单）。
 
 ## 四、能力
 

@@ -1,7 +1,13 @@
 # SSO 单点登录 + 忘记密码功能 - 实施总结
 
+> ⚠️ **历史快照（2026-01-09），非当前架构** —— 本文描述的「前端 Cookie-first + sso_access_token 共享 Cookie」是当时的过渡方案。
+> **终态架构已演进为**：OIDC authorization_code + PKCE（public client）+ 每应用 localStorage 独立存票（`token_kind=oidc`）+
+> 跨应用共享靠 **IdP 会话 Cookie**（auth-center 域，静默免登/静默重授权）；前端 `token.ts` 的 Cookie 读写**默认关闭**（`cookie.enabled=false`）。
+> 当前接入口径以 **[INTEGRATION-GUIDE.md](./INTEGRATION-GUIDE.md)** 为唯一权威；本文仅作演进历史留存，文内「待完成工作 / 待测」清单均已长期完成。
+> 遗留至今仍然有效的部分：忘记密码四步流程（`LoginPanel` 内，见 FORGOT-PASSWORD-USAGE.md）。
+
 **日期**: 2026-01-09  
-**状态**: 前端组件开发完成，待各应用接入测试
+**状态**: 前端组件开发完成，待各应用接入测试（✅ 已于 2026-09 全部完成并入终态架构）
 
 ---
 
