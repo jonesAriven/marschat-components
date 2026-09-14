@@ -9,6 +9,12 @@
 export { createRequest, createLocalStorageTokenStore } from './request'
 export type { CreateRequestOptions, TokenStore } from './request'
 
+// SPA 部署 base（子路径）读取点：
+//   应用在入口声明 `window.__MARSCHAT_APP_BASE__ = CONTEXT_PATH`，
+//   库内所有「跳登录页 / 站内绝对路径」都用 appPath() 拼，避免写死根相对 '/login'
+//   （子路径部署下会跳到域名根 → nginx 404，见 ADR §32.11）。
+export { getAppBase, appPath } from './appBase'
+
 // 拦截器
 export { createAuthInterceptor } from './interceptors/authInterceptor'
 export { createErrorInterceptor } from './interceptors/errorInterceptor'

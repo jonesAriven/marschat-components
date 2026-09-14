@@ -33,7 +33,7 @@ export interface AuthInterceptorOptions {
  *     redirectUri: `${window.location.origin}/login`,
  *   },
  *   onRefreshFailed: () => {
- *     window.location.href = '/login'
+ *     window.location.href = appPath('/login')   // 带 SPA 部署 base，勿写死 '/login'
  *   }
  * })
  * ```
@@ -90,13 +90,15 @@ export function createAuthInterceptor(options: AuthInterceptorOptions = {}) {
             await onRefreshFailed()
           } else {
             clearTokens()
-            window.location.href = '/login'
+            // 🔴 必须带 SPA 部署 base：写死 '/login' 会跳到域名根 → nginx 404
+            //    （子路径部署 /ops、/kb、/infra、/portal 下实测，见 ADR §32.11）
+            window.location.href = appPath('/login')
           }
         }
       } else if (status === 401) {
-        // 非 OIDC 的 401，直接跳转登录
+        // 非 OIDC 的 401，直接跳转登录（同上：带 base）
         clearTokens()
-        window.location.href = '/login'
+        window.location.href = appPath('/login')
       }
       
       return false // 未处理，交给默认错误处理

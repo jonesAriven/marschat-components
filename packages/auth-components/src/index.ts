@@ -63,6 +63,8 @@ export { useMenus } from './composables/useMenus'
 export type { MenuItemDef } from './composables/useMenus'
 
 // 工具函数
+// SPA 部署 base 读取点（应用入口声明 window.__MARSCHAT_APP_BASE__，库内拼站内绝对路径用）
+export { getAppBase, appPath } from './utils/appBase'
 export {
   initTokenConfig,
   getToken,
