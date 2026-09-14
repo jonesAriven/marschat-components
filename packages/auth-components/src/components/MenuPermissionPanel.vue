@@ -80,7 +80,15 @@ export interface MenuPermissionConfig {
 interface RoleItem {
   id: number
   scope: string
-  clientId: string | null
+  /**
+   * ⚠️ `/admin/roles` 由 `JdbcTemplate.queryForList` **直出 snake_case**（`client_id`），
+   * 故两个键名都要接：只读 camelCase 会让**全部 client 级角色被静默过滤掉**
+   * （2026-09-14 实测缺陷：中心「角色与菜单授权」面板只显示 2 个平台角色，
+   *  新建的应用角色一个都看不到 → 应用角色无法配置权限）。
+   * 同类教训：0.6.5 `parent_id`、0.6.8 应用角色弹窗 `client_id`。
+   */
+  clientId?: string | null
+  client_id?: string | null
   code: string
   name: string
 }
@@ -118,9 +126,11 @@ const treeData = ref<TreeItem[]>([])
 /** 应用全部 menu 权限点（含失效），code -> node */
 const permMap = ref<Map<string, PermNode>>(new Map())
 
-/** 只展示 platform 级角色 + 本应用 client 级角色 */
+/** 只展示 platform 级角色 + 本应用 client 级角色（client 归属做 snake/camel 双键兼容） */
 const visibleRoles = computed(() =>
-  roles.value.filter((r) => r.scope === 'platform' || r.clientId === props.config.clientId),
+  roles.value.filter(
+    (r) => r.scope === 'platform' || (r.clientId ?? r.client_id) === props.config.clientId,
+  ),
 )
 
 function headers(): Record<string, string> {
