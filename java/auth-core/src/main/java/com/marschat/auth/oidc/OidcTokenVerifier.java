@@ -25,7 +25,7 @@ import java.util.concurrent.locks.ReentrantReadWriteLock;
  * <p>
  * 设计要点：
  * <ul>
- *   <li>JWKS 从 auth-center 拉取（compose 内网直连 kb-auth，绕过公网回环），内存缓存 TTL 10 分钟；</li>
+ *   <li>JWKS 从 auth-center 拉取（compose 内网直连 auth-center，绕过公网回环），内存缓存 TTL 10 分钟；</li>
  *   <li>启动预热一次，失败不阻断启动（kb-auth 未就绪时首次请求再拉）；</li>
  *   <li>按 kid 匹配公钥，keyId 缺失时回退单 key 场景；</li>
  *   <li>验签同时校验 issuer 与过期；legacy HS256 token 由 {@code TokenProvider} 用本地密钥兜底。</li>
@@ -43,7 +43,15 @@ public class OidcTokenVerifier {
     @Value("${marschat.oidc.issuer:https://auth.marschat.online}")
     private String issuer;
 
-    @Value("${marschat.oidc.jwks-uri:http://kb-auth:8085/oauth2/jwks}")
+    /**
+     * JWKS 地址。
+     *
+     * <p>⚠️ 2026-09-14 修正默认值：原默认为 {@code http://kb-auth:8085/oauth2/jwks}，
+     * 而 **kb-auth 服务早已下线**（Phase 0 由 auth-center 取代，仅保留 compose 网络别名兜底）。
+     * 默认值指向一个"靠别名才存在"的名字是隐形陷阱——一旦别名被清理，所有未显式配置
+     * {@code marschat.oidc.jwks-uri} 的消费方会集体验签失败。改为真实服务名 {@code auth-center}。
+     */
+    @Value("${marschat.oidc.jwks-uri:http://auth-center:8085/oauth2/jwks}")
     private String jwksUri;
 
     private final ReentrantReadWriteLock lock = new ReentrantReadWriteLock();
