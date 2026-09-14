@@ -32,6 +32,24 @@ export type {
   CenterUserOption,
   CreateAccountMappingClientOptions,
 } from './utils/accountMapping'
+// Phase 8：跨应用授权矩阵（中心侧「哪些账号有哪些系统的权限」一屏总览）
+export { default as CrossAppAuthPanel } from './components/CrossAppAuthPanel.vue'
+export {
+  createAuthorizationMatrixClient,
+  AuthorizationMatrixError,
+  roleClientId,
+} from './utils/authorizationMatrix'
+export type {
+  AuthorizationMatrixClient,
+  AuthorizationMatrixConfig,
+  AuthorizationMatrixResult,
+  MatrixClientRef,
+  MatrixUserRow,
+  MatrixRole,
+  MatrixRoleDef,
+  MatrixQuery,
+  CreateAuthorizationMatrixClientOptions,
+} from './utils/authorizationMatrix'
 // Phase 2：RBAC 权限门
 export { default as PermissionGate } from './components/PermissionGate.vue'
 
@@ -93,6 +111,7 @@ export type {
   UserAdminClient,
   UserManagementConfig,
   CreateUserAdminClientOptions,
+  UserAdminScope,
 } from './utils/userAdmin'
 
 // 类型

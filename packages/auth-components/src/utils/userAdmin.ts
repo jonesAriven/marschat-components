@@ -34,6 +34,14 @@ export interface AdminUserItem {
   realmId?: string | null
   createdAt?: string | null
   updatedAt?: string | null
+  /**
+   * 该用户在本应用（`scope.clientId`）下的角色（`[{id,code,name}]`）。
+   *
+   * ⚠️ **仅应用作用域**（`UserAdminScope.mode='app'`）下发：
+   * 服务端在 `GET /admin/users?client=<id>` 时整页回填，避免前端逐行再发请求（N+1）。
+   * 平台作用域查询不返回该字段（保持历史契约不变）。
+   */
+  appRoles?: Array<{ id: number; code: string; name: string }> | null
 }
 
 /** 列表查询参数 */
@@ -43,6 +51,12 @@ export interface UserPageQuery {
   /** 关键字（username / email / nickname 模糊） */
   keyword?: string
   realmId?: string
+  /**
+   * 应用作用域过滤（Phase 8）：传本应用 `client_id` 时，服务端只返回
+   * 「与本应用有关」的用户（在本应用有角色绑定 / 有本应用账号映射认领 / 是管理员）。
+   * 不传 = 平台作用域（全量统一身份）。
+   */
+  client?: string
 }
 
 /** 分页结果（与 common-core `PageResult` 对齐） */
@@ -229,6 +243,7 @@ export function createUserAdminClient(options: CreateUserAdminClientOptions): Us
         query: {
           realmId: query.realmId,
           keyword: query.keyword,
+          client: query.client,
           page: query.page ?? 1,
           size: query.size ?? 20,
         },
@@ -258,10 +273,40 @@ export function createUserAdminClient(options: CreateUserAdminClientOptions): Us
   }
 }
 
+/**
+ * 用户管理**作用域**（Phase 8 · 双作用域用户体系的核心开关）。
+ *
+ * 平台与各应用复用**同一个** `UserManagementPanel`，但职责必须不同：
+ *
+ * | | `{mode:'platform'}` | `{mode:'app', clientId}` |
+ * |---|---|---|
+ * | 定位 | 统一认证中心（全平台所有人） | 本系统用户（只与本应用有关的人） |
+ * | 列表 | 全量统一身份 | 服务端按 `client` 过滤 |
+ * | 全局角色 | 可编辑 | **只读**（改全局角色属中心职责） |
+ * | 删除 | 可软删除统一身份 | **无**（改为「移出本系统」= 解绑本应用角色） |
+ * | 新增 | 新建统一身份 | 可新建身份（并自动加入本系统）+ **添加已有用户** |
+ *
+ * ⚠️ 默认（不传）= `{mode:'platform'}`，保证既有宿主零回归。
+ */
+export type UserAdminScope =
+  | { mode: 'platform' }
+  | {
+      mode: 'app'
+      /** 本应用 `client_id`（绑定作用域 + 列表过滤依据） */
+      clientId: string
+      /** 应用展示名（用于文案，如「门户 Portal」）；缺省用 clientId */
+      appName?: string
+    }
+
 /** 用户管理面板配置（`UserManagementPanel.vue` 的 props.config） */
 export interface UserManagementConfig {
   /** 数据源（必填） */
   client: UserAdminClient
+  /**
+   * 作用域（Phase 8）。缺省 = `{mode:'platform'}`。
+   * 传 `{mode:'app', clientId}` 即切换为「本系统用户」语义（见 {@link UserAdminScope}）。
+   */
+  scope?: UserAdminScope
   /** 标题，默认「用户管理」 */
   title?: string
   /** 副标题 / 说明文案 */

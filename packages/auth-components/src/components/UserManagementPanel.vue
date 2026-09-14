@@ -22,6 +22,10 @@
             </el-input>
             <el-button :loading="loading" @click="handleSearch">查询</el-button>
             <el-button v-if="!cfg.readonly" type="primary" @click="openCreate">新建用户</el-button>
+            <!-- 应用作用域：把「已存在但尚未加入本系统」的用户加进来（否则列表被 client 过滤后无从下嘴） -->
+            <el-button v-if="!cfg.readonly && isAppScope" @click="openAddExisting">
+              添加已有用户
+            </el-button>
           </div>
         </div>
       </template>
@@ -38,9 +42,27 @@
         </el-table-column>
         <el-table-column prop="nickname" label="昵称" min-width="120" />
         <el-table-column prop="email" label="邮箱" min-width="190" />
-        <el-table-column label="角色" width="110">
+        <el-table-column :label="isAppScope ? '全局角色' : '角色'" width="110">
           <template #default="{ row }">
             <el-tag :type="roleTagType(row.role)" size="small">{{ roleLabel(row.role) }}</el-tag>
+          </template>
+        </el-table-column>
+        <!-- 应用作用域：展示该用户在本应用的角色（服务端随列表整页回填，无 N+1） -->
+        <el-table-column v-if="isAppScope" label="本系统角色" min-width="150">
+          <template #default="{ row }">
+            <template v-if="row.appRoles && row.appRoles.length">
+              <el-tag
+                v-for="r in row.appRoles"
+                :key="r.id"
+                class="app-role-tag"
+                size="small"
+                type="success"
+                effect="light"
+              >
+                {{ r.name || r.code }}
+              </el-tag>
+            </template>
+            <span v-else class="muted-text">未分配</span>
           </template>
         </el-table-column>
         <el-table-column label="状态" width="90">
@@ -53,7 +75,7 @@
         <el-table-column label="创建时间" width="170">
           <template #default="{ row }">{{ formatTime(row.createdAt) }}</template>
         </el-table-column>
-        <el-table-column v-if="!cfg.readonly" label="操作" :width="cfg.appRoles ? 300 : 240" fixed="right">
+        <el-table-column v-if="!cfg.readonly" label="操作" :width="opColumnWidth" fixed="right">
           <template #default="{ row }">
             <el-button link type="primary" size="small" @click="openEdit(row)">编辑</el-button>
             <el-button
@@ -72,10 +94,25 @@
               size="small"
               @click="openAppRoles(row)"
             >
-              应用角色
+              {{ isAppScope ? '本系统角色' : '应用角色' }}
+            </el-button>
+            <!--
+              应用作用域下**不提供删除**：删除的是「统一身份」，属中心职责。
+              应用侧对应的动作是「移出本系统」= 解绑该用户在本应用的全部角色（身份保留）。
+            -->
+            <el-button
+              v-if="isAppScope"
+              link
+              type="danger"
+              size="small"
+              :disabled="isSelf(row)"
+              :title="isSelf(row) ? '不能把自己移出当前系统' : ''"
+              @click="handleRemoveFromApp(row)"
+            >
+              移出本系统
             </el-button>
             <el-button
-              v-if="cfg.allowDelete !== false"
+              v-else-if="cfg.allowDelete !== false"
               link
               type="danger"
               size="small"
@@ -123,7 +160,8 @@
         <el-form-item label="邮箱" prop="email">
           <el-input v-model="form.email" placeholder="用于找回密码（可选）" />
         </el-form-item>
-        <el-form-item v-if="cfg.allowEditRole !== false" label="角色" prop="role">
+        <!-- 应用作用域下不允许改「全局角色」：那是统一认证中心的职责 -->
+        <el-form-item v-if="cfg.allowEditRole !== false && !isAppScope" label="角色" prop="role">
           <el-select v-model="form.role" style="width: 100%">
             <el-option v-for="r in roleOptions" :key="r.value" :label="r.label" :value="r.value" />
           </el-select>
@@ -184,6 +222,70 @@
         <el-button type="primary" :loading="appRolesSaving" @click="saveAppRoles">保存</el-button>
       </template>
     </el-dialog>
+
+    <!-- 添加已有用户（仅应用作用域）：从全平台统一身份池挑选，加入本系统 -->
+    <el-dialog
+      v-model="addVisible"
+      :title="`添加已有用户到「${appDisplayName}」`"
+      width="760px"
+      :close-on-click-modal="false"
+    >
+      <p class="reset-hint">
+        从<b>全平台统一身份</b>中挑选用户加入本系统（不新建账号）。已在本系统的用户会标记「已加入」且不可重复勾选。
+        加入后默认获得角色「<b>{{ defaultAppRoleName || '（本应用暂无 client 级角色）' }}</b>」，可在列表里继续调整。
+      </p>
+      <div class="add-toolbar">
+        <el-input
+          v-model="addKeyword"
+          placeholder="搜索用户名 / 邮箱 / 昵称"
+          clearable
+          class="add-search"
+          @keyup.enter="loadAddCandidates"
+          @clear="loadAddCandidates"
+        >
+          <template #prefix>
+            <el-icon><Search /></el-icon>
+          </template>
+        </el-input>
+        <el-button :loading="addLoading" @click="loadAddCandidates">查询</el-button>
+      </div>
+      <el-table
+        v-loading="addLoading"
+        :data="addRows"
+        height="320"
+        row-key="id"
+        @selection-change="onAddSelectionChange"
+      >
+        <el-table-column type="selection" width="46" :selectable="isAddSelectable" />
+        <el-table-column prop="username" label="用户名" min-width="140" />
+        <el-table-column prop="nickname" label="昵称" min-width="110" />
+        <el-table-column prop="email" label="邮箱" min-width="180" show-overflow-tooltip />
+        <el-table-column label="全局角色" width="100">
+          <template #default="{ row }">
+            <el-tag :type="roleTagType(row.role)" size="small">{{ roleLabel(row.role) }}</el-tag>
+          </template>
+        </el-table-column>
+        <el-table-column label="成员状态" width="100">
+          <template #default="{ row }">
+            <el-tag v-if="addJoinedIds.has(row.id)" type="info" size="small" effect="plain">
+              已加入
+            </el-tag>
+            <span v-else class="muted-text">未加入</span>
+          </template>
+        </el-table-column>
+      </el-table>
+      <template #footer>
+        <el-button @click="addVisible = false">取消</el-button>
+        <el-button
+          type="primary"
+          :loading="addSaving"
+          :disabled="!addSelectedIds.length"
+          @click="submitAddExisting"
+        >
+          加入本系统（已选 {{ addSelectedIds.length }}）
+        </el-button>
+      </template>
+    </el-dialog>
   </div>
 </template>
 
@@ -204,11 +306,34 @@ const props = defineProps<{
 }>()
 
 const emit = defineEmits<{
-  /** 数据被修改（新增/编辑/删除/重置密码成功）后触发，便于宿主刷新自身状态 */
-  (e: 'changed', action: 'create' | 'update' | 'delete' | 'resetPassword'): void
+  /** 数据被修改（新增/编辑/删除/重置密码/移出本系统成功）后触发，便于宿主刷新自身状态 */
+  (
+    e: 'changed',
+    action: 'create' | 'update' | 'delete' | 'resetPassword' | 'removeFromApp'
+  ): void
 }>()
 
 const cfg = computed(() => props.config)
+
+// ---------------- 作用域（Phase 8 双作用域用户体系） ----------------
+/**
+ * 作用域：缺省 `platform`（全平台统一身份），传 `{mode:'app', clientId}` 即「本系统用户」。
+ * 见 `utils/userAdmin.ts` 的 `UserAdminScope` 文档表。
+ */
+const authScope = computed(() => props.config.scope ?? { mode: 'platform' as const })
+const isAppScope = computed(() => authScope.value.mode === 'app')
+/** 本应用 client_id（仅 app 模式非空） */
+const appClientId = computed(() =>
+  isAppScope.value ? (authScope.value as { mode: 'app'; clientId: string }).clientId : ''
+)
+/** 本应用展示名（仅 app 模式，用于文案） */
+const appDisplayName = computed(() =>
+  isAppScope.value
+    ? (authScope.value as { mode: 'app'; clientId: string; appName?: string }).appName || appClientId.value
+    : ''
+)
+/** 操作列宽度随可用按钮数变化（app 模式：编辑/重置密码/本系统角色/移出本系统） */
+const opColumnWidth = computed(() => (isAppScope.value ? 280 : props.config.appRoles ? 300 : 240))
 
 /** 默认角色选项：最低权限放最后，新建时默认选它 */
 const roleOptions = computed(
@@ -235,6 +360,8 @@ async function load(): Promise<void> {
       size: pageSize.value,
       keyword: keyword.value.trim() || undefined,
       realmId: props.config.realmId,
+      // 应用作用域：服务端按 client 过滤（只返回与本系统有关的用户），并回填 appRoles
+      client: isAppScope.value ? appClientId.value : undefined,
     })
     rows.value = res.list
     total.value = res.total
@@ -449,7 +576,7 @@ async function submitForm(): Promise<void> {
       ElMessage.success('已更新')
       emit('changed', 'update')
     } else {
-      await props.config.client.create({
+      const created = await props.config.client.create({
         username: form.username.trim(),
         password: form.password,
         role: form.role || undefined,
@@ -457,6 +584,10 @@ async function submitForm(): Promise<void> {
         email: form.email || undefined,
         realmId: props.config.realmId,
       })
+      // 应用作用域：新建的统一身份默认加入本系统（授予本应用默认 client 级角色）
+      if (isAppScope.value) {
+        await joinAppForNewUser(created)
+      }
       ElMessage.success('已创建')
       emit('changed', 'create')
     }
@@ -470,6 +601,154 @@ async function submitForm(): Promise<void> {
 }
 
 // ---------------- 删除 ----------------
+/**
+ * 移出本系统（仅应用作用域）。
+ *
+ * 语义：**解绑该用户在本应用的全部 client 级角色**（`roleIds: []`），
+ * 统一身份本身保留 —— 这是应用侧能做的最强动作，删除统一身份属中心职责。
+ */
+async function handleRemoveFromApp(row: AdminUserItem): Promise<void> {
+  if (!props.config.appRoles) {
+    ElMessage.warning('未配置 appRoles，无法移出本系统')
+    return
+  }
+  try {
+    await ElMessageBox.confirm(
+      `确定把「${row.username}」移出「${appDisplayName.value}」？\n` +
+        '该用户将失去在本系统的全部角色（统一身份仍保留，不会影响其它系统）。',
+      '移出确认',
+      { type: 'warning', confirmButtonText: '移出', cancelButtonText: '取消' }
+    )
+  } catch {
+    return // 用户取消
+  }
+  try {
+    await appRolesApi(`/users/${row.id}/client-roles?client=${encodeURIComponent(appClientId.value)}`, {
+      method: 'PUT',
+      body: JSON.stringify({ roleIds: [] }),
+    })
+    ElMessage.success('已移出本系统（最迟 60 秒生效）')
+    emit('changed', 'removeFromApp')
+    if (rows.value.length === 1 && page.value > 1) page.value -= 1
+    void load()
+  } catch (e) {
+    ElMessage.error(errMsg(e))
+  }
+}
+
+// ---------------- 添加已有用户（仅应用作用域） ----------------
+/**
+ * 解决 app 模式的「鸡生蛋」问题：列表被 `client` 过滤后，只看得到**已在本系统**的人，
+ * 管理员无从把「已存在但尚未加入本系统」的用户加进来。
+ * 这里从**全平台用户池**（不带 client 的 `/admin/users`）挑选，再落到本应用的 client 级角色。
+ */
+const addVisible = ref(false)
+const addLoading = ref(false)
+const addSaving = ref(false)
+const addKeyword = ref('')
+const addRows = ref<AdminUserItem[]>([])
+const addJoinedIds = ref<Set<number>>(new Set())
+const addSelectedIds = ref<number[]>([])
+const defaultAppRoleId = ref<number | null>(null)
+const defaultAppRoleName = ref('')
+
+/** 读取本应用的 client 级角色，默认取第一个作为「加入即授予」的角色 */
+async function loadAppRoleDefs(): Promise<void> {
+  const all = await appRolesApi<Array<Record<string, any>>>('/roles')
+  // ⚠️ /roles 由 queryForList 直出 snake_case（client_id）—— 双键兼容（同 0.6.5 parent_id 教训）
+  const mine = all.filter(
+    (r) => r.scope === 'client' && (r.client_id ?? r.clientId) === appClientId.value
+  )
+  defaultAppRoleId.value = mine.length ? Number(mine[0].id) : null
+  defaultAppRoleName.value = mine.length ? String(mine[0].name || mine[0].code) : ''
+}
+
+/** 拉取候选用户（全平台池）+ 本系统当前成员（用于标记「已加入」） */
+async function loadAddCandidates(): Promise<void> {
+  addLoading.value = true
+  try {
+    const kw = encodeURIComponent(addKeyword.value.trim())
+    const cid = encodeURIComponent(appClientId.value)
+    const [pool, members] = await Promise.all([
+      appRolesApi<{ list?: AdminUserItem[] }>(`/users?keyword=${kw}&page=1&size=20`),
+      appRolesApi<{ list?: AdminUserItem[] }>(`/users?client=${cid}&page=1&size=200`),
+    ])
+    addRows.value = pool?.list ?? []
+    addJoinedIds.value = new Set<number>((members?.list ?? []).map((u) => u.id))
+  } catch (e) {
+    ElMessage.error(errMsg(e))
+  } finally {
+    addLoading.value = false
+  }
+}
+
+function onAddSelectionChange(selected: AdminUserItem[]): void {
+  addSelectedIds.value = selected.map((r) => r.id)
+}
+
+/** 已在本系统的用户不可重复勾选（避免覆盖其既有角色） */
+function isAddSelectable(row: AdminUserItem): boolean {
+  return !addJoinedIds.value.has(row.id)
+}
+
+async function openAddExisting(): Promise<void> {
+  addVisible.value = true
+  addSelectedIds.value = []
+  addRows.value = []
+  addKeyword.value = ''
+  try {
+    await loadAppRoleDefs()
+    await loadAddCandidates()
+  } catch (e) {
+    ElMessage.error(errMsg(e))
+  }
+}
+
+/** 批量把选中用户加入本系统（授予默认 client 级角色） */
+async function submitAddExisting(): Promise<void> {
+  if (!props.config.appRoles) return
+  if (defaultAppRoleId.value === null) {
+    ElMessage.warning('本应用暂无 client 级角色，请先在「统一认证中心 → 角色与菜单授权」创建角色')
+    return
+  }
+  addSaving.value = true
+  try {
+    const ids = [...addSelectedIds.value]
+    for (const uid of ids) {
+      await appRolesApi(`/users/${uid}/client-roles?client=${encodeURIComponent(appClientId.value)}`, {
+        method: 'PUT',
+        body: JSON.stringify({ roleIds: [defaultAppRoleId.value] }),
+      })
+    }
+    ElMessage.success(`已加入 ${ids.length} 个用户（最迟 60 秒生效）`)
+    addVisible.value = false
+    emit('changed', 'create')
+    void load()
+  } catch (e) {
+    ElMessage.error(errMsg(e))
+  } finally {
+    addSaving.value = false
+  }
+}
+
+/** 应用作用域下新建统一身份后，自动把它加入本系统（失败不阻断创建结果） */
+async function joinAppForNewUser(user: AdminUserItem): Promise<void> {
+  if (!props.config.appRoles) return
+  try {
+    if (defaultAppRoleId.value === null) await loadAppRoleDefs()
+    if (defaultAppRoleId.value === null) {
+      ElMessage.warning('用户已创建，但本应用暂无 client 级角色，未自动加入本系统')
+      return
+    }
+    await appRolesApi(`/users/${user.id}/client-roles?client=${encodeURIComponent(appClientId.value)}`, {
+      method: 'PUT',
+      body: JSON.stringify({ roleIds: [defaultAppRoleId.value] }),
+    })
+  } catch (e) {
+    ElMessage.warning(`用户已创建，但加入本系统失败：${errMsg(e)}`)
+  }
+}
+
 async function handleDelete(row: AdminUserItem): Promise<void> {
   try {
     await ElMessageBox.confirm(
@@ -601,5 +880,23 @@ defineExpose({ reload: load, reloadToFirstPage: reload })
   font-size: 13px;
   padding: 16px 0;
   text-align: center;
+}
+
+/* 应用作用域新增样式（Phase 8） */
+.app-role-tag {
+  margin: 0 4px 0 0;
+}
+.muted-text {
+  color: var(--el-text-color-placeholder);
+  font-size: 12px;
+}
+.add-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 12px;
+}
+.add-search {
+  width: 260px;
 }
 </style>
