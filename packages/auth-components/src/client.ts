@@ -79,9 +79,14 @@ export function createSsoClient(config: SsoConfig) {
     handleCallback: (searchParams?: URLSearchParams): Promise<string> =>
       handleSsoCallback(config, searchParams),
 
-    /** 静默续期：重跑一次授权（token 过期 / 收到 401 时调用，不返回） */
-    renew: (redirect?: string): Promise<never> =>
-      renewByReauthorize(config, redirect || `${window.location.pathname}${window.location.search}`),
+    /**
+     * 静默续期：重跑一次授权（token 过期 / 收到 401 时调用，不返回）。
+     *
+     * ⚠️ 不要在这里拼 `window.location.pathname`：它**含部署前缀**（如 `/ops`），
+     * 而回调页是 `router.replace` 落地的（router 自带 base）→ 会拼成 `/ops/ops/...` 落 404。
+     * 不传时由 `renewByReauthorize` 内部经 `toSpaPath()` 统一剥离前缀（2026-09-15 实测修复）。
+     */
+    renew: (redirect?: string): Promise<never> => renewByReauthorize(config, redirect),
 
     /** 统一登出（SLO）：销毁 IdP 会话 + 清本地，然后回跳 */
     logout: (options?: SloOptions): void => ssoLogout(config, options),

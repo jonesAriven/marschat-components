@@ -96,7 +96,9 @@ export function useSso(config: SsoConfig) {
   async function refreshToken(): Promise<void> {
     if (!getRefreshToken()) {
       // 无 refresh_token：静默重授权（不会返回）
-      await renewByReauthorize(config, `${window.location.pathname}${window.location.search}`)
+      // ⚠️ 不传 location.pathname（含部署前缀）——renewByReauthorize 内部经 toSpaPath 剥离，
+      //    否则回调 router.replace 会再拼一次 base → /ops/ops/...（2026-09-15 实测修复）
+      await renewByReauthorize(config)
       return
     }
     try {

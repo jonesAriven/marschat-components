@@ -112,7 +112,9 @@ export async function handleSsoCallback(
   // 清理 session 存储
   sessionStorage.removeItem(SESSION_KEYS.state)
   sessionStorage.removeItem(SESSION_KEYS.verifier)
-  const target = sessionStorage.getItem(SESSION_KEYS.redirect) || '/dashboard'
+  // 兜底规范化（纵深防御）：回调返回的是「router 内部路径」，落地由调用方 router.replace/push 完成。
+  // 若历史遗留 / 其它调用点写进来的值已带部署前缀，这里再剥一次，避免落 /ops/ops/... 这类重复路径。
+  const target = toSpaPath(config, sessionStorage.getItem(SESSION_KEYS.redirect) || '/dashboard')
   sessionStorage.removeItem(SESSION_KEYS.redirect)
 
   // 存储 token
@@ -296,31 +298,49 @@ export function ssoLogout(config: SsoConfig, options: SloOptions = {}): void {
 }
 
 /**
+ * 把「可能带部署前缀的站内地址」规范化为 **router 内部路径**。
+ *
+ * 部署前缀从 `config.redirectUri` 推导（去掉末段 callback 文件名）：
+ *   `https://host/ops/sso-callback` → base `/ops`
+ *
+ * 为什么必须规范化（2026-09-15 实测踩中）：
+ *   回调页/续期落地是 `router.replace/push(target)`，而 router 自带 base，
+ *   若 target 里**已经带了 base**（如 `/ops/dashboard`），就会拼成
+ *   `/ops/ops/dashboard` → 不匹配任何路由 → 渲染 404 / 无侧栏空页。
+ *   触发源不止一处：`sso.renew()`（client.ts）与 `refreshToken()`（useSso.ts）
+ *   都把 `window.location.pathname`（含 base）作为**显式** redirect 传进来，
+ *   在「显式传参」分支上原本不剥离，于是身份守卫触发的静默重授权必然踩中。
+ *   故统一收敛到本函数：**单一咽喉点**，显式/隐式两种来源都规范化。
+ *
+ * 幂等：已经是内部路径（`/dashboard`）时不做任何变换。
+ */
+export function toSpaPath(config: SsoConfig, raw?: string): string {
+  const v = (raw ?? `${window.location.pathname}${window.location.search}`).trim()
+  if (!v) return '/dashboard'
+  try {
+    const cbPath = new URL(config.redirectUri, window.location.origin).pathname
+    const base = cbPath.replace(/\/[^/]*$/, '') // '/ops/sso-callback' -> '/ops'
+    if (base && base !== '/'
+        && (v === base || v.startsWith(`${base}/`) || v.startsWith(`${base}?`))) {
+      return v.slice(base.length) || '/'
+    }
+  } catch {
+    /* redirectUri 非法时保持原样（宁可原样，也不要抛错打断认证流程） */
+  }
+  return v
+}
+
+/**
  * 静默续期（方案 A）：public client 拿不到 refresh_token，
  * 改为「悄悄重跑一次授权」——IdP 会话在则秒回新 code，用户无感。
  *
- * 默认落地路径 = 当前页。⚠️ 必须剥离**部署前缀**（如 kb-web 的 `/kb`）：
- * 回调页是用 router.replace(target) 落地的，router 自带 base 会再拼一次前缀，
- * 不剥就会落到 `/kb/kb/users` 这类重复路径（2026-09-12 实测）。
- * 前缀从 config.redirectUri 推导（去掉末段 callback 路径），应用显式传
- * 应用内 path 时不受影响。
+ * 落地路径：显式传入或默认取当前页，**一律经 {@link toSpaPath} 剥掉部署前缀**，
+ * 否则回调页的 router 会再拼一次 base → `/kb/kb/users` 这类重复路径（多次实测）。
  *
  * @returns 同样不会返回（已导航离开）
  */
 export async function renewByReauthorize(config: SsoConfig, redirect?: string): Promise<never> {
-  const current = `${window.location.pathname}${window.location.search}`
-  let target = redirect || current
-  if (!redirect) {
-    try {
-      const cbPath = new URL(config.redirectUri, window.location.origin).pathname
-      const base = cbPath.replace(/\/[^/]*$/, '')
-      if (base && current.startsWith(base)) {
-        target = current.slice(base.length) || '/'
-      }
-    } catch {
-      /* redirectUri 非法时保持原样 */
-    }
-  }
+  const target = toSpaPath(config, redirect)
   clearTokens()
   await startSsoLogin(config, target)
   return new Promise<never>(() => {})
