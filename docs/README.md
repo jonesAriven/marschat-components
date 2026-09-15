@@ -348,6 +348,8 @@ apis:                       # ⚠️ api 点任何模式都不自动授予，写
 | **24** | **流水线 SUCCESS ≠ 产物已更新**：前端部署后必须核对线上 chunk 内容（或 bundle hash），不能只看构建成功 | 部署了旧产物 → 功能没生效 → 排查方向被误导（Phase 11 实测：`UsersView` 线上仍是旧 chunk） |
 | **25** | **push 后必须用 `git ls-remote <remote> <branch>` 核对远程 tip**，不能只看 push 命令无报错 | 本地有 commit、远程没有 → 流水线构建旧代码，白跑一轮部署（Phase 11 实测） |
 | **26** | 应用侧 BFF 代理路径要**按该应用 nginx 的 rewrite 规则**推导（如 infra：nginx `location /infra/api/` → `proxy_pass .../infra/` 会**剥掉一层 `/api`**，故浏览器需请求 `/infra/api/api/admin/users`） | 路径少/多一层 → 404，且回显路径能直接看出被剥了几层 |
+| **27** | **测免登必须用全新 profile + 显式清 localStorage**；用持久 profile 会因应用本地残留 token 被守卫弹走而得到**假阳性**（看着像免登） | 误判「免登正常」，掩盖真实缺陷（Phase 11 cosmic 排查初期即因此走弯路） |
+| **28** | 登录页**不要做「一次性重授权标记」这类短路**：标记若只在失败分支清除，成功分支残留后会永久短路，导致「IdP 会话活着却不免登」。进登录页应**必探一次** IdP 会话 | cosmic / portal 均因此出现免登失效（`*_reauth_once` 标记） |
 
 ---
 
