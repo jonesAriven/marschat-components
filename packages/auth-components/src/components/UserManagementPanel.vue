@@ -21,7 +21,11 @@
               </template>
             </el-input>
             <el-button :loading="loading" @click="handleSearch">查询</el-button>
-            <el-button v-if="!cfg.readonly" type="primary" @click="openCreate">新建用户</el-button>
+            <!--
+              应用作用域**不提供「新建用户」**：人（统一身份）属平台，新建会落全局身份（POST /admin/users）。
+              应用台「加人」走右侧「添加已有用户」（把已存在身份加入本系统），不在本组件里创建人。
+            -->
+            <el-button v-if="!cfg.readonly && !isAppScope" type="primary" @click="openCreate">新建用户</el-button>
             <!-- 应用作用域：把「已存在但尚未加入本系统」的用户加进来（否则列表被 client 过滤后无从下嘴） -->
             <el-button v-if="!cfg.readonly && isAppScope" @click="openAddExisting">
               添加已有用户
@@ -78,8 +82,13 @@
         <el-table-column v-if="!cfg.readonly" label="操作" :width="opColumnWidth" fixed="right">
           <template #default="{ row }">
             <el-button link type="primary" size="small" @click="openEdit(row)">编辑</el-button>
+            <!--
+              应用作用域**不提供重置密码**：口令是「统一身份」的全局属性，
+              改它会影响该用户在所有系统的登录 —— 属平台级职责，只在中心管理台做。
+              应用侧对应用户的动作为「移出本系统」（解绑本应用角色，身份保留）。
+            -->
             <el-button
-              v-if="cfg.allowResetPassword !== false"
+              v-if="cfg.allowResetPassword !== false && !isAppScope"
               link
               type="warning"
               size="small"
@@ -157,7 +166,7 @@
     <!-- 新建 / 编辑 -->
     <el-dialog
       v-model="formVisible"
-      :title="editing ? '编辑用户' : '新建用户'"
+      :title="editing ? (isAppScope ? '用户信息（只读）' : '编辑用户') : '新建用户'"
       width="460px"
       :close-on-click-modal="false"
     >
@@ -168,11 +177,12 @@
         <el-form-item v-if="!editing" label="密码" prop="password">
           <el-input v-model="form.password" type="password" show-password placeholder="至少 6 位" />
         </el-form-item>
+        <!-- 应用作用域：身份字段（用户名/昵称/邮箱/全局角色/状态）一律只读，应用管理员不得改全局身份 -->
         <el-form-item label="昵称" prop="nickname">
-          <el-input v-model="form.nickname" placeholder="显示名（可选）" />
+          <el-input v-model="form.nickname" :disabled="isAppScope" placeholder="显示名（可选）" />
         </el-form-item>
         <el-form-item label="邮箱" prop="email">
-          <el-input v-model="form.email" placeholder="用于找回密码（可选）" />
+          <el-input v-model="form.email" :disabled="isAppScope" placeholder="用于找回密码（可选）" />
         </el-form-item>
         <!-- 应用作用域下不允许改「全局角色」：那是统一认证中心的职责 -->
         <el-form-item v-if="cfg.allowEditRole !== false && !isAppScope" label="角色" prop="role">
@@ -180,13 +190,15 @@
             <el-option v-for="r in roleOptions" :key="r.value" :label="r.label" :value="r.value" />
           </el-select>
         </el-form-item>
-        <el-form-item v-if="editing" label="状态" prop="status">
+        <!-- 应用作用域不展示「状态」开关：启用/禁用是全局动作（PUT /admin/users/{id} status），仅平台职责 -->
+        <el-form-item v-if="editing && !isAppScope" label="状态" prop="status">
           <el-switch v-model="form.status" :active-value="1" :inactive-value="0" active-text="启用" inactive-text="禁用" />
         </el-form-item>
       </el-form>
       <template #footer>
         <el-button @click="formVisible = false">取消</el-button>
-        <el-button type="primary" :loading="submitting" @click="submitForm">确定</el-button>
+        <!-- 应用作用域为「身份只读」视图：无字段可改，故不提供「确定」，避免误落全局身份变更 -->
+        <el-button v-if="!isAppScope" type="primary" :loading="submitting" @click="submitForm">确定</el-button>
       </template>
     </el-dialog>
 
@@ -626,6 +638,8 @@ function openEdit(row: AdminUserItem): void {
 }
 
 async function submitForm(): Promise<void> {
+  // 应用作用域为「身份只读」视图：无字段可改，绝不落任何全局身份变更（越权入口纵深防护）
+  if (isAppScope.value) return
   const ok = await formRef.value?.validate().catch(() => false)
   if (!ok) return
 
