@@ -4,9 +4,11 @@
 > 受众：新建自研系统的接入者、平台组件维护者、运维值班。
 > 权威演进全记录：`devtools/docs/adr/ADR-2026-09-10-平台重构Phase0清死代码.md`（§26-§37，本文与其口径一致，冲突时以 ADR 最新章节为准）。
 >
-> **版本基线（2026-09-15 Phase 11 收口后，全部为线上实测态）**
-> `@marschat/auth-components` **0.8.6** ｜ `@marschat/frontend-common` 0.3.5 ｜ `com.marschat:auth-core` **2.1.6** ｜ `com.marschat:common-core` 1.1.6
+> **版本基线（2026-09-16 Phase 12 进行中，全部为线上实测态）**
+> `@marschat/auth-components` **0.8.8**（0.8.8 = app 作用域身份只读，D-3 收口；已发布 Nexus npm-hosted）｜ `@marschat/frontend-common` 0.3.5 ｜ `com.marschat:auth-core` **2.1.6** ｜ `com.marschat:common-core` 1.1.6
 > 6 应用（portal / activecode / kb-web / cosmic / kb-ops / infra-monitor）的**登录页、SSO、统一鉴权、权限体系**全部接入。
+>
+> 📋 **Phase 12 进度交接快照**：`docs/PHASE12-PROGRESS-2026-09-16.md`（已完成/关键坑/未完成待办，接手先读）。
 >
 > ⚠️ **Phase 11 修正**：Phase 10 曾写「初衷达成」，全量复核后发现**独立账密**这条路径此前仍是各应用本地校验（身份与口令分裂）。现已定型为「账密唯一真源在认证中心，应用 BFF 转发」（见 §6.0）：
 > ✅ 已落地：portal · infra-monitor · activecode · cosmic
