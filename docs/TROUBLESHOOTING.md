@@ -71,6 +71,17 @@
 
 ---
 
+### 1.6 SSO 回调后提示「统一认证登录失败 / username 与 token 不一致」
+
+| 项 | 内容 |
+|---|---|
+| **症状** | 点「统一认证登录」→ IdP 登录成功 → 回跳应用 `sso-callback` → 红框 `SSO 登录后端失败: username 与 token 不一致` |
+| **定位** | ① 解码两个令牌的声明（浏览器 Console）：`JSON.parse(atob(token.split('.')[1]))`；② 对比「前端将要送出的 username」与「后端将要取的 tokenUsername」是否同源；③ 带会话打 `/api/auth/session` 看最终身份 |
+| **根因（2026-09-17 实测，缺陷 D1）** | 中心 SAS 令牌 **`sub` 是用户 ID**（实测 `"1"`）、**`username` 才是登录名**（实测 `"admin"`），且 **id_token 不签发 `username`/`preferred_username`/`unique_name`**（只有 sub）。前端 `activecode/sso.js` 从 **id_token** 取 `preferred_username ‖ unique_name ‖ sub` → 只能拿到 `sub`（`"1"`）；后端 `/sso-login` 从 **access_token** 取 `username`（`"admin"`）→ 必然不等。F2 修复只改了后端没改前端 ⇒ **契约漂移** |
+| **口令** | **凡「按用户名认身份」的逻辑，必须从 access_token 取 `username` 声明，绝不用 `sub`（那是 uid）** |
+| **修复范式（已落地，其它应用可照抄）** | ① 前端与后端**同序同名**取 `username → preferred_username → sub`；② 后端**身份一律以验签令牌声明为准**，请求体 username 降级为客户端自述 —— 不一致记 WARN 不阻断。硬校验并不增加安全性（会话主体本就来自验签令牌），却会把「客户端取错字段」放大成「整条 SSO 通道不可用」 |
+| **验证** | `GET /activecode/api/auth/session`（带会话）→ 期望 `{"username":"admin","success":true}`；`localStorage.activecode_sso_user` 应为 `admin`（修复前是 `"1"`） |
+
 ## 2. 权限类
 
 ### 2.1 登录后侧边栏一片空白
@@ -204,6 +215,13 @@ python3 woodScript/trigger-pipeline.py <项目名>                            # 
 | ③ | Toast 文案抓不到 | 读取时 Toast 已消失 | 注入 `MutationObserver` 累积 |
 | ④ | 「A8 邮箱验证码」失败 | 上一轮刚发过**同一邮箱**，命中 60s 频控返回 400 | 用**唯一邮箱**；频控另立用例断言 400 |
 | ⑤ | 「未提交改动丢了 / git 说 ahead」 | Windows 侧 `.git/refs` 不落盘 + auto-backup 抢跑 | 判同步**只信 `ls-remote` 对远端取 tip** |
+| ⑥ | 把「统一认证登录失败 username 与 token 不一致」当产品缺陷直接猜改 | 先量后判：解码令牌后确认是**前后端契约漂移**（前端取 id_token.sub、后端取 access_token.username）；且同轮排查里我自己的脚本又出了 6 个缺陷 | 见 §1.6；断言前先打印「前端将送的值 vs 后端将取的值」 |
+| ⑦ | 某应用报「有 console error（404）」 | 断言在应用之间**没有重置错误缓冲**，把 portal 的 404 记到了 kb-web 头上 | 每个应用断言前 `reset()` |
+| ⑧ | cosmic 业务页「特征词不匹配」 | 特征词写成大写 `COSMIC`，实际渲染 `cosmic-studio` | 特征词**从登录后页面真实 innerText 里抄** |
+| ⑨ | activecode 免登「没落到 main.html」 | 该应用 SSO 后**按设计**落 `index.html`（公开自助页），`main.html` 才是管理页 | 先读设计的落地路径再写断言 |
+| ⑩ | 「点了登录没反应」（同类第 3 次） | 按文本长度排序取到**父节点**（`div.el-form-item` 与内部 `<button>` 文本同长）→ 点父节点无效（事件只向上冒泡） | 精确匹配 `button` **全等文本** + 派发真实鼠标事件到其 bbox 中心 |
+| ⑪ | 独立登录「失败」（4 个应用） | 断言写成「**任何** toast 都算失败」，而 toast 正是成功提示「登录成功」 | 成功判据用「落点 URL + 登录接口 200 + 无密码框」，**不要用「无 toast」** |
+| ⑫ | portal 特征词不匹配 | 特征词抄自**登录页的营销文案**（「工具看板」），登录后页面是侧边栏文案 | 同 8 |
 
 **通用心法**：
 - 断言要**有区分度**（例：白名单不能只看「无凭据 401 vs 404」—— 安全过滤器在 controller 之前就返回 401/403，白名单根本没被执行到；要**带真实会话**或**验产物字节码**）。

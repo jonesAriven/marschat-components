@@ -189,3 +189,47 @@ portal 未登录 → 点「统一认证登录」→ 落 IdP → **输入口令 1
 
 > 环境前置：`ssh root@192.168.31.105`（免密）· mykng 装有 `/usr/bin/chromium` 与 Python `websockets`/`requests`。
 > 夹具纪律：所有临时账号**随机口令、用后墓碑**；临时 client 五表清理并自检残留=0；role 绑定精确还原。
+
+---
+
+## 8. 追加 · D1 缺陷修复与全量登录复验（2026-09-17 晚）
+
+### 8.1 缺陷 D1（真实缺陷，已修复上线）
+
+**现象**：SSO 登录 portal 后再进 activecode，回调页红框 `SSO 登录后端失败: username 与 token 不一致`。
+
+**取证（真机复现 + 令牌声明实测 + A/B 对照）**：
+
+| 项 | 实测值 |
+|---|---|
+| access_token 声明 | `sub="1"`（用户 ID）、**`username="admin"`**、`aud=marschat-activecode` |
+| id_token 声明 | `sub="1"`，**不含** `username` / `preferred_username` / `unique_name` / `name` |
+| 前端送出（`sso.js` 取 id_token） | `"1"` |
+| 后端比对（取 access_token.username） | `"admin"` |
+| **A/B 对照** | 送 `"1"` → **403**「username 与 token 不一致」；送 `"admin"` → **200**，随后 `/session` = `{"username":"admin"}` |
+| 副作用 | `localStorage.activecode_sso_user` 被写成 `"1"`（用户 ID 当用户名） |
+
+**根因**：F2（2026-09-15，「SAS 令牌 sub=用户ID」治理）**只改了后端**，前端 `activecode/sso.js` 仍从 id_token 取 `sub` ⇒ **前后端契约漂移**，SSO 回调 100% 失败。
+
+**修复**（提交 `2e63b6f`，流水线 #817 SUCCESS，已核验 182 上 jar 字节码与线上静态资源）：
+1. 前端 `usernameFromToken()` 改从 **access_token** 取，与后端同序（`username → preferred_username → sub`）；顺带修正 `activecode_sso_user` 落库值；
+2. 后端 `ssoLogin` **身份一律以验签令牌声明为准**，请求体 username 降级为客户端自述（不一致记 WARN，不再 403），并补 INFO/WARN 日志。
+
+> 另核查**未发现**第二处缺陷：`sessionWatcher` 身份守卫的 `getLocalIdentity` 各应用取 `sub`（`"1"`），而中心 `/auth/session` 返回的 `username` 字段**实际也是 uid**（实测 `"1"`）→ 口径自洽，不会误判。（该字段命名有歧义，已登记。）
+
+### 8.2 全量登录复验（最终结果）
+
+| 场景 | 用例 | 结果 |
+|---|---|---|
+| **A. SSO 单点免登** | portal 发起 → 跨 kb-web / kb-ops / infra / cosmic / activecode | ✅ **14/14 PASS**；**口令输入总次数 = 1** |
+| A 附加 | activecode 会话身份 | ✅ `/api/auth/session` = `{"username":"admin"}`；`activecode_sso_user` = `admin` |
+| A 附加 | 6 应用业务页渲染 + console 零错误（逐应用重置缓冲后） | ✅ 全通过 |
+| **B. 独立账密登录** | portal / kb-web / infra / cosmic | ✅ **4/4 PASS**（落点正确 + 登录接口 200 + 无密码框） |
+| B 附加 | activecode 独立账密 | ✅ PASS（D7 轮：落 `main.html`、接口 200） |
+| B 附加 | kb-ops | ✅ 按设计无账密入口（纯 SSO 应用） |
+
+**结论**：修复后 SSO 与独立登录**双通道全绿**，无残留问题。
+
+### 8.3 本轮测试脚本缺陷清单（12 条累计，**先怀疑测试再怀疑产品**）
+
+见 `TROUBLESHOOTING.md` §6。本轮新增 6 条（状态缓冲未重置、特征词大小写、落地路径与设计不符、点父节点、把成功 toast 当失败、特征词抄错来源）—— **全部为脚本侧缺陷，产品侧仅 D1 一处真实缺陷**。
