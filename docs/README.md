@@ -10,6 +10,8 @@
 >
 > 📋 **Phase 12 进度交接快照**：`docs/PHASE12-PROGRESS-2026-09-16.md`（已完成/关键坑/未完成待办，接手先读）。
 >
+> 📊 **Phase 12 收口汇总（截至 2026-09-17）**：`docs/PHASE12-SUMMARY-2026-09-17.md`（全量实测核验 + 已完成清单 + 剩余项与决策清单）。
+>
 > ⚠️ **Phase 11 修正**：Phase 10 曾写「初衷达成」，全量复核后发现**独立账密**这条路径此前仍是各应用本地校验（身份与口令分裂）。现已定型为「账密唯一真源在认证中心，应用 BFF 转发」（见 §6.0）：
 > ✅ 已落地：portal · infra-monitor · activecode · cosmic
 > ⬜ 待办：kb-web / kb-ops / kb-gateway（爆炸半径最大，需单独立项）
@@ -49,7 +51,7 @@ auth-center（:8085，唯一身份与授权真源）
 | `com.marschat:common-core` | Maven | Result/异常体系/MyBatis-Plus 自动配置/链路 trace | 所有 Java 后端 |
 
 - 源：Nexus `nexus.marschat.online`（npm-*/maven-releases）；仓库：Gitee `jonesAriven/marschat-components`（monorepo）
-- **无构建前端**（纯静态页）用 UMD 产物 `marschat-auth-core.umd.js`（同步脚本 `devtools/woodScript/sync-auth-core-umd.sh`，版本戳 `VENDORED-auth-core-umd.md`，0.8.6 sha256 `fe949f00…`）
+- **无构建前端**（纯静态页）用 UMD 产物 `marschat-auth-core.umd.js`（同步脚本 `devtools/woodScript/sync-auth-core-umd.sh`，版本戳 `VENDORED-auth-core-umd.md`，0.8.8 sha256 `be44ea0a…`）
 
 ## 3. 令牌与信任域（三种令牌，务必分清）
 
@@ -89,7 +91,7 @@ auth-center（:8085，唯一身份与授权真源）
 **权限点两类**：`menu:*`（可见性）与 `api:*`（动作，**默认拒**）。拿 menu 点当写接口闸门＝假闸门（任何拿到菜单者皆可写）。
 
 **strict 默认最小权限（Phase 10 终态）**：
-- 平台 user/admin、应用 user 角色**只自动获得 `public: true` 的落地菜单**（每应用至多一个，如看板/工作台）；portal/activecode 无 public 菜单。
+- 平台 user/admin、应用 user 角色**只自动获得 `public: true` 的落地菜单**（每应用至多一个，如看板/工作台）；portal 无 public 菜单（activecode 以 `index` 为唯一 public 落地页）。
 - 其余菜单与**全部 api 点**必须管理员在中心显式授权。
 - 灰度三步已收官：portal 试点 → 应用上报 public → 全局 strict；一键回滚 `MARSCHAT_AUTHZ_MODE=legacy`（重启即复原，幂等可逆）。
 - R10 fail-open：中心侧 `configured=false`（未配置任何权限点）或权限查询失败 → 全放行（枢纽抖动不打死整站）。**已知取舍**：cosmic 服务端 OIDC 缓存 30min 过期后权限查询 401 → 菜单级限制暂失效，写接口仍受硬闸门保护。
@@ -312,7 +314,7 @@ apis:                       # ⚠️ api 点任何模式都不自动授予，写
 
 ## 特殊形态 A：无构建静态页接入（activecode 模式）
 
-1. **UMD**：`sync-auth-core-umd.sh` 把 `marschat-auth-core.umd.js`(0.8.6) 同步进应用静态目录，回写 `VENDORED-auth-core-umd.md`（版本/大小/sha256 三对齐，坑 #13 同源）。sso.js 只写薄适配：localStorage 键映射 + 换票后调 BFF。
+1. **UMD**：`sync-auth-core-umd.sh` 把 `marschat-auth-core.umd.js`(0.8.8) 同步进应用静态目录，回写 `VENDORED-auth-core-umd.md`（版本/大小/sha256 三对齐，坑 #13 同源）。sso.js 只写薄适配：localStorage 键映射 + 换票后调 BFF。
 2. **后端 BFF 代理端点**（转发中心内网 `192.168.31.105:8085`，不暴露 secret）：
    - `POST /api/auth/mail-login/send-code` → 中心 `/auth/mail-login/send-code`
    - `POST /api/auth/mail-login` → 中心 `/auth/mail-login`（**响应体 HS384 + data.user，直接采信身份**，坑 #16）
