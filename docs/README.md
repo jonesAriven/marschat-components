@@ -12,6 +12,9 @@
 >
 > 📊 **Phase 12 收口汇总（截至 2026-09-17）**：`docs/PHASE12-SUMMARY-2026-09-17.md`（全量实测核验 + 已完成清单 + 剩余项与决策清单）。
 >
+> 🛠 **排查手册（症状 → 定位 → 根因）**：`docs/TROUBLESHOOTING.md`（含取证命令集与「已知误判清单」）。
+>
+> 🧪 **Phase 12 全量验证报告**：`docs/VERIFY-REPORT-2026-09-17.md`（102 用例 / 0 真实失败）。
 > ⚠️ **Phase 11 修正**：Phase 10 曾写「初衷达成」，全量复核后发现**独立账密**这条路径此前仍是各应用本地校验（身份与口令分裂）。现已定型为「账密唯一真源在认证中心，应用 BFF 转发」（见 §6.0）：
 > ✅ 已落地：portal · infra-monitor · activecode · cosmic
 > ⬜ 待办：kb-web / kb-ops / kb-gateway（爆炸半径最大，需单独立项）
@@ -185,7 +188,52 @@ auth-center（:8085，唯一身份与授权真源）
 
 ---
 
-# 第二篇 接入指南（新应用从零）
+## 8. 三层权限模型（Phase 12 定型 · 服务端真源）
+
+> 背景：Phase 12 之前，「平台管理员 vs 应用管理员」只是**共享组件的 UI 约定**（`scope.mode='app'` 藏按钮），
+> 服务端所有 `/admin/**` 只有类级 `hasRole('ADMIN')` —— 能打开应用台「本系统用户」页的人**必然是平台管理员**，
+> 「应用侧只能管本系统」是错觉。Phase 12 已把该边界**下沉到 API**（R1）。
+
+### 8.1 三层定义
+
+| 层 | 管什么 | 判据 | 端点形态 |
+|---|---|---|---|
+| **Identity**（身份） | 人是否存在、口令、全局角色、停用/删除墓碑、账号映射、跨应用总览 | 平台管理员（`ROLE_ADMIN`，**DB 现查、不可伪造**） | `/admin/users**`、`/admin/mappings**`、`/admin/authorization-matrix` |
+| **Membership**（成员） | 谁在本系统、在本系统什么角色、移出本系统 | **应用管理员**（本 client 持 `api:admin:write`） | `/admin/clients/{cid}/members**`、`/admin/clients/{cid}/users/{uid}/roles` |
+| **Entitlement**（授权） | 平台级：角色→权限点；应用级：用户→应用角色 / 菜单减法 | 平台级=平台管理员；应用级=应用管理员（限本 client） | `/admin/roles/{id}/permission-codes`（平台）· `/admin/clients/{cid}/users/{uid}/menu-overrides`（应用） |
+
+**关键原则：`clientId` 只从 URL path 取，不从 body / query 取。** 只要 client 是「参数」，把 `client=B` 一改就能越界。
+
+### 8.2 端点总表（Phase 12 终态）
+
+| method | path | 鉴权 | 说明 |
+|---|---|---|---|
+| GET | `/admin/clients/{cid}/members` | 应用管理员 | 列本系统成员（响应 `{list,total,page,size}`，**不是 records**） |
+| POST | `/admin/clients/{cid}/members` | 应用管理员 | 加人（`{userId, roleIds}`） |
+| DELETE | `/admin/clients/{cid}/members/{uid}` | 应用管理员 | 移出本系统（**不是**删身份） |
+| GET | `/admin/clients/{cid}/member-candidates` | 应用管理员 | 加人候选：**只回 `userId`/`username`/`nickname`**、只列未加入者、`keyword`≥2 字符、`size` clamp ≤20、**写审计** |
+| GET | `/admin/clients/{cid}/roles` | 应用管理员 | **只读**本 client 角色清单（供加人弹窗） |
+| POST | `/admin/clients/{cid}/roles` | **平台管理员** | 建应用角色（防应用自造角色提权）—— 与上一行**同名不同权** |
+| GET/PUT | `/admin/clients/{cid}/users/{uid}/roles` | 应用管理员 | 查 / 绑本系统角色 |
+| GET/PUT | `/admin/clients/{cid}/users/{uid}/menu-overrides` | 应用管理员 | 菜单**减法**（只减不加） |
+| — | `/admin/users**`、`/admin/mappings**`、`/admin/roles/{id}/permission-codes` | **平台管理员** | Identity / 平台级 Entitlement |
+| PUT | `/admin/users/{uid}/client-roles?client=` | `hasRole('ADMIN') or 应用管理员` | ⚠️ `@Deprecated`，存量兼容保留（回滚路径） |
+
+### 8.3 两条防越权护栏
+
+1. **R8 自锁**：若某次变更将导致该应用**再无 `api:admin:write` 持有者** —— 应用管理员 **409** 拒绝；平台管理员放行并写审计 `user.remove_last_app_admin`。
+2. **应用管理员加法补齐**：应用管理员对本应用全量 menu+api 的绑定由中心**幂等补齐**（`NOT EXISTS`）。
+   - ⇒ **新上报的 api 点会自动到应用管理员手上**（实测 kb-ops 新增 25 点后补齐 **28/28**）；
+   - ⇒ 但 **api 点对普通用户永不自动授予** —— 上线新写闸门前**必须确认使用者已被显式授权**，否则立即「点了就报错」。
+
+### 8.4 应用侧配合（已定型，违反即视为缺陷）
+
+- 应用台（`scope=app`）**不得**出现：新建用户、停用/启用、重置密码、删除身份、建应用角色。组件 0.8.8 起已按作用域裁剪（「编辑」退化为**只读视图**「用户信息（只读）」）。
+- 应用侧用户管理**必须经本应用 BFF / 网关**代理中心 `/admin/**`，以**用户本人身份**转发；**禁止**前端直连中心域名，**禁止**服务账号兜底。
+- 应用 BFF = **白名单默认拒绝**（**不是**前缀全透传）。中心每新增一个管理端点，应用侧须**显式登记**，否则 404。
+
+---
+
 
 > 标准参考实现（薄适配层四件套 + 后端三件套）：`devtools/infra-monitor/infra-monitor-{web,server}`。全程**不改 auth-center Java**。
 
@@ -312,7 +360,44 @@ apis:                       # ⚠️ api 点任何模式都不自动授予，写
 | 账号映射 | LocalAccountReporter + AccountMappingPanel | infra-monitor / cosmic |
 | 统一登录页 | LoginPage（品牌/深色/响应式内置，0.3.1 起样式自动注入） | 六应用同一登录壳 |
 
-## 特殊形态 A：无构建静态页接入（activecode 模式）
+## Level 4：接入验收检查清单（上线前逐条打勾）
+
+**A. 注册与配置**
+- [ ] `apps-registry.yml` 已加条目（`client-id` / `redirect-uris` **三环境** / `api-base`），并跑过 `gen-from-registry.py`
+- [ ] `menu-report-secret` 走 env 注入（**不写明文默认值**）
+- [ ] `menu-registry.yml` 有且**仅有 1 个** `public: true` 落地页（portal 例外=0，需显式注释说明理由）
+
+**B. 前端**
+- [ ] `window.__MARSCHAT_APP_BASE__` 在 `setupAuthGuard` **之前**设置
+- [ ] `setupAuthGuard(router)` 在 `app.use(router)` **之前**（坑 #5）
+- [ ] `sso.ts` 薄适配**包一层绑定配置再导出**（禁止裸再导出，坑 #7）
+- [ ] 401 分流**先判 `isOidcToken()`** 再判 refresh_token（坑 #3）
+- [ ] 续期 / 回跳传 **router 内部路径**（无部署前缀，坑 #1）
+- [ ] 登录页**不做**「一次性重授权标记」短路（坑 #28）
+- [ ] `app-config.json` 解析前**先剥 `//` 横幅**（坑 #4）
+
+**C. 后端**
+- [ ] `SecurityConfig` **显式 401 entry point**（否则过期 token 返 403 → 前端拦截器永不触发 → 假死，坑 #2）
+- [ ] `issuer` 与签发端**逐字一致**（坑 #8）；JWKS 走**内网**（坑 #9）
+- [ ] 管理面 BFF = **白名单默认拒绝**，且**先查白名单再取 token**（未登记路径直接 404，不转发、不泄漏）
+- [ ] BFF 透传**调用者本人** `Authorization`；拿不到 → 401（**无服务账号兜底**）
+- [ ] 每应用**独立** `JWT_SECRET`（≥64B 随机，禁弱默认样式）
+
+**D. 权限**
+- [ ] 写接口挂**方法级** `@RequirePermission("api:xxx")`（类级 `menu:*` 只作访问闸门）
+- [ ] 中心已注册该 api 点，**且使用者已显式授权**（api 点不自动授予）
+- [ ] 前端三层同源：`permCode(type,code)` **全码**喂 SidebarMenu / 路由 `meta.perm` / PermissionGate（坑 #10）
+
+**E. 验收（真浏览器、禁缓存）**
+- [ ] SSO 免登：**口令输入次数 == 1**，且跨应用全部免登
+- [ ] 三种登录方式：独立账密 / 邮箱验证码 / 忘记密码
+- [ ] 负例：错密 401 文案、无 token 401
+- [ ] 接口闸门三态（200 / 403 / 401）
+- [ ] SLO 联动（另一应用登出后本应用被请出）
+- [ ] **换废票 E2E**：往 localStorage 注垃圾 token → 重载应自动恢复（暴露坑 #1/#2）
+- [ ] 应用台**无**「新建用户 / 重置密码 / 删除」，「编辑」为**只读**视图
+- [ ] Network 中**无**跨域直连中心 `/admin/**` 的请求（OIDC 跳转除外）
+
 
 1. **UMD**：`sync-auth-core-umd.sh` 把 `marschat-auth-core.umd.js`(0.8.8) 同步进应用静态目录，回写 `VENDORED-auth-core-umd.md`（版本/大小/sha256 三对齐，坑 #13 同源）。sso.js 只写薄适配：localStorage 键映射 + 换票后调 BFF。
 2. **后端 BFF 代理端点**（转发中心内网 `192.168.31.105:8085`，不暴露 secret）：
@@ -354,6 +439,11 @@ apis:                       # ⚠️ api 点任何模式都不自动授予，写
 | **26** | 应用侧 BFF 代理路径要**按该应用 nginx 的 rewrite 规则**推导（如 infra：nginx `location /infra/api/` → `proxy_pass .../infra/` 会**剥掉一层 `/api`**，故浏览器需请求 `/infra/api/api/admin/users`） | 路径少/多一层 → 404，且回显路径能直接看出被剥了几层 |
 | **27** | **测免登必须用全新 profile + 显式清 localStorage**；用持久 profile 会因应用本地残留 token 被守卫弹走而得到**假阳性**（看着像免登） | 误判「免登正常」，掩盖真实缺陷（Phase 11 cosmic 排查初期即因此走弯路） |
 | **28** | 登录页**不要做「一次性重授权标记」这类短路**：标记若只在失败分支清除，成功分支残留后会永久短路，导致「IdP 会话活着却不免登」。进登录页应**必探一次** IdP 会话 | cosmic / portal 均因此出现免登失效（`*_reauth_once` 标记） |
+| **29** | 共享组件用 `lang="scss"` 时 **`sass` 必须在 `devDependencies`** —— 靠传递依赖会静默失败，真错误被 vite `closeBundle` 的 ENOENT 掩盖 | 构建「成功」但产物异常 / 忽然构建失败 |
+| **30** | BFF 白名单收窄前**必须盘点页面真实调用面**；漏登记一条＝制造「点了就报错」的坏功能 | kb-ops「菜单授权」被漏放行，平台管理员也点不动（R3→R4 已修） |
+| **31** | 判「BFF 白名单是否放行」**不能用「无凭据 401 vs 404」**：安全过滤器在 controller **之前**就返回 401/403，白名单根本没被执行到。**必须带真实会话**，或**验产物字节码** | 探针全 401/403，误以为白名单没生效 |
+| **32** | 同一文件的多处改动**不要在脚本里分两次 plan**（后写覆盖前写，改动静默丢失）；应**先全量校验锚点、再统一落盘** | 一组改动被覆盖，靠 diff 复核才发现 |
+| **33** | 判「组件版本是否已升」要**看产物自报的 `version` 常量**，不能只看 `VENDORED.md` 的版本戳 | UMD 版本戳标 0.8.8、产物自报 0.8.7（发版漏重建） |
 
 ---
 
@@ -385,6 +475,12 @@ apis:                       # ⚠️ api 点任何模式都不自动授予，写
 
 **平台常备测试资产**（`CodeBuddy 工作区 verify/phase10/`，回归口径见 ADR §37.5/.9/.10）：
 `wb_p10_regress.py`（A 六应用免登 / B 普通用户菜单收窄）· `wb_p10_d2.py`（身份切换双前缀）· `wb_p10_l3.py`（闸门 4 用例）· `wb_p10_l1.py`（activecode 邮箱码）· `wb_p10_r1_auth.py`（认证矩阵 21 例，含忘记密码全闭环）· `wb_p10_r2_sec.py`（令牌安全 23 例）· `wb_runall.py`（**6 应用并行全站点击巡检**，66 页 0 错误 0 弹窗）· `wb_p10_cap.py`（RS256 捕获）。临时普通账号：`POST /admin/users`（常驻回归账号 p10x，id=302）。
+
+> **Phase 12 全量验证（2026-09-17）**：**102 用例 / 0 真实失败**，结果与复现方式见 `docs/VERIFY-REPORT-2026-09-17.md`；覆盖平台基线、数据真源、6 应用接入面、三层权限边界、R8 自锁、BFF 白名单、HPP、浏览器级 SSO 免登与 app 作用域只读。
+>
+> **线上排查先看 `docs/TROUBLESHOOTING.md`**（症状 → 定位路径 → 根因 + 取证命令集 + 「已知误判清单」）。
+>
+> 旧资产（Phase 10，Windows 侧浏览器驱动）在 CodeBuddy 工作区 `verify/phase10/`，依赖 `.workbuddy-ai/tools/wb_lib`；端点口径较旧，复用前先核对。
 
 ## 5. 组件发版
 
