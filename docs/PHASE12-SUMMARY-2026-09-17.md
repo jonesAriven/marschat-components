@@ -15,6 +15,7 @@
 | 3 | **仓库同步健康**：`devtools` Gitee / GitHub `dev` = `acee7d1e`（一致）；`marschat-components` Gitee / GitHub `main` = `7053a0ae`（一致）。 |
 | 4 | 🔴 **新发现（本轮）**：`marschat-auth-core.umd.js` 内 `version = "0.8.7"`，而 `VENDORED-auth-core-umd.md` 已标注 `0.8.8`——**UMD 未按 0.8.8 重新构建，只改了版本戳**，破坏「版本/大小/sha256 三对齐」。 |
 | 5 | **剩余项集中在 3 类**：① 权限下沉的**第二层**（应用台 path 化 Membership API、kb-ops 假闸门整改）；② 4 项**待良哥拍板**（F1 密钥轮换 / 3.2-B 令牌分离 / auto-git-sync 处置 / auth-center 715b41e 推送）；③ 低危收口（BFF 重复 client 参数、apps-registry 明文 secret 默认值、文档漂移、cosmic 路由改名）。 |
+| 6 | **R4 收口（09-17 下午）已落地**：BFF 重复 `client` 参数（HPP）加固 ×3、kb-ops「菜单授权」页修复（R3 遗留坏功能）、kb-ops 菜单授权页签守卫、portal 0-public 注释。提交 `1061d2d`，流水线 #811/#812/#814/#815 全 SUCCESS；已闭合 §4 的 P2-1 / P1-3 / P2-5，并把 P2-9 / P2-10 结案。详见 §10。 |
 
 ---
 
@@ -322,5 +323,45 @@ git -C /root/devtools ls-remote origin dev; git -C /root/devtools ls-remote $(gi
 **devtools 仓**：`docs/adr/ADR-2026-09-16-Phase12-统一认证权限治理.md`（权威演进，含 §4.5 纠偏与 §7 待办）
 
 ---
+
+---
+
+## 10. 追加 · R4 收口（2026-09-17 下午）
+
+> 本轮只做「**无需决策、可自包含落地、风险可控**」的项。提交 `1061d2d`（devtools `dev`，Gitee + GitHub 双推，`ls-remote` 三方一致）。
+> 流水线：**#811 active-manager ✅ / #812 infra-monitor ✅ / #814 kb-ops-web ✅ / #815 kb-ops ✅**。
+> （#813 kb-ops-web 首跑在 `sync-ci-scripts` 挂掉——该步会全量重写 CIFS 上的 `/mnt/shared/woodScript`，属瞬时抖动；原号重触发即过。）
+
+### 10.1 已闭合项
+
+| # | 项 | 改动 | 验证证据 |
+|---|---|---|---|
+| P2-1 | **BFF 重复 `client` 参数（HPP）加固** | 三个 `AdminProxyController`（activecode / infra-monitor / kb-ops）的 `clientScopeOk` 前置 `countParam(query,"client") > 1 → 拒绝`，并新增 `countParam` 工具方法 | **已部署字节码核验**：三容器 jar 内 `AdminProxyController.class` 均命中 `countParam`（infra-monitor / kb-ops 在 mykng；activecode 在 `192.168.31.182`） |
+| P1-3 | **kb-ops「菜单授权」页修复（R3 遗留坏功能）** | `kb-ops` BFF 白名单补登 `GET /admin/permissions`（带 `client` 校验）+ `GET|PUT /admin/roles/{id}/permission-codes`；新增常量 `ROLE_PERM_CODES` | 字节码核验命中 `permission-codes`。**根源**：`MenuPermissionPanel` 共调 4 个中心端点，R3 白名单只放行 1 个 → 另 2 个落 404，平台管理员在 kb-ops 也点不动「菜单授权」 |
+| P1-3 | **kb-ops 菜单授权页签守卫** | `kb-ops-web` `UsersView.vue` 页签加 `v-if="isPlatformAdmin"`（与账号映射页签同口径，应用管理员不再看到平台级面板） | kb-ops-web 已重建（`index-CtFTTybh.js`） |
+| P2-5 | **portal 显式注明「有意不设 public 菜单」** | `portal-server/src/main/resources/menu-registry.yml` 增 3 行注释，防后人误加 `public: true` | 纯注释、零行为；**未部署**（下次自然发版带上） |
+
+### 10.2 本轮判定结案（原 ⚠️ 项）
+
+| # | 原状 | 实测结论 |
+|---|---|---|
+| P2-9 | portal 忘记密码「代码侧无后端端点、依赖 nginx，无从保证」 | ✅ **线上可用**：`POST https://main.marschat.online/portal/auth-api/forgot-password` → **200**（中心 `code:200`）。链路 = nginx `/portal/auth-api/` **直连 auth-center**，不经 portal-server（故 portal-server 无该端点是设计使然，非缺陷）。 |
+| P2-10 | infra 忘记密码跨应用依赖 kb-gateway | ✅ **线上可用**：`POST https://monitor.marschat.online/kb/api/auth/forgot-password` → **200**。但**架构耦合仍在**（借道 mykng/kb-gateway；mykng 不可用则 infra 无法自助改密）→ 仍建议按 P2 加固。 |
+
+### 10.3 验证口径修正（重要，供复核）
+
+**BFF 白名单不能用「无凭据 401 vs 404」区分**：三个应用的 Spring Security 过滤器在 controller **之前**即返回 401（infra-monitor / activecode）或 403（kb-ops），而白名单判定在 controller 内 —— 未鉴权请求根本到不了白名单。
+⇒ 本轮改用**已部署产物字节码核验**（`docker cp` 取出 jar → 抽 `AdminProxyController.class` → grep 新增符号），此为决定性证据。
+带会话的**功能级**验证仍需真实账号 → 仍归 §4.1 P1-5。
+
+### 10.4 R4 后仍未做（分类不变）
+
+| 类别 | 项 |
+|---|---|
+| 需**拍板** | F1 密钥轮换 / 3.2-B 令牌分离 / auto-git-sync 处置 / auth-center `715b41e` 推送 |
+| 需**协同**（同窗口） | kb-ops 假闸门整改（24 个 api 点，须与中心授权同时执行，否则立即「点了就报错」）；apps-registry 明文 secret 改 env-only（改 `clients.yml` 会触发 auth-center 枢纽重建） |
+| 需**发版工程** | 应用台 Membership API path 化（组件契约 + 6 宿主页 + activecode 手写页） |
+| 需**真浏览器 + 真实账号** | E2E 场景 B~F、已认证端到端验收 |
+| 低优先 | 本地改密端点下线（P1-4）、cosmic `/admin` 改名、UMD 重建（§2.7）、CI UMD 同步 wiring |
 
 *生成：2026-09-17 · 依据：WorkBuddy 会话归档 17 份 + mykng 线上实测 + 源码实读 · 维护人：接手 Phase 12 的下一轮执行者*
