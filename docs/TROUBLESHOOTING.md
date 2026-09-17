@@ -100,7 +100,8 @@
 | **症状** | 六应用 SSO 流程各带一条 404，文本里**没有 URL** |
 | **定位** | `Log.entryAdded` 只给文本。必须配合 `Network.responseReceived` 抓 URL —— 本轮抓到真身是 `https://auth.marschat.online/favicon.ico`（浏览器停 IdP 登录页时自动请求） |
 | **根因** | 该路径落 auth-center 链3 的 `anyRequest().authenticated()` → 直连 8085 实测 403，经公网入口回落 404 |
-| **现状** | **已修**：链3 显式 `permitAll("/favicon.ico")` + `static/favicon.ico` |
+| **现状** | **已修（三处联动）**：① auth-center 链3 `permitAll("/favicon.ico")` ② `static/favicon.ico` ③ **边缘 nginx** 补 `location = /favicon.ico` 精确匹配反代 |
+| **坑** | 只做完 ①② 公网仍是 404 —— 该站点末尾 `location / { return 404; }`，未登记路径一律顶回。**排查要追到最末端节点**（`trace_terminal`） |
 
 ---
 
@@ -245,7 +246,10 @@ python3 woodScript/trigger-pipeline.py <项目名>                            # 
 | ⑪ | 独立登录「失败」（4 个应用） | 断言写成「**任何** toast 都算失败」，而 toast 正是成功提示「登录成功」 | 成功判据用「落点 URL + 登录接口 200 + 无密码框」，**不要用「无 toast」** |
 | ⑫ | portal 特征词不匹配 | 特征词抄自**登录页的营销文案**（「工具看板」），登录后页面是侧边栏文案 | 同 8 |
 | ⑬ | 5 应用 × 2 轮共 10 条「跨域直连中心」FAIL | 证据全是 `https://auth.marschat.online/auth/session` —— 这是**设计内的 SLO 会话探针**（auth-center 链2 显式 permitAll + 带凭据 CORS），各应用 `startSessionWatcher` 靠它做登出联动 | 违规判据收窄为「跨域 `/admin/**`」或「跨域提交账密 `/auth/login`」 |
-| ⑭ | R3/R4 九条「登出后仍免登」FAIL，看着像 SLO 全崩 | portal「退出登录」在 `el-dropdown-menu` 内，**未展开时不在 DOM** → 脚本返回 `NO-BUTTON`，登出压根没触发 | 先点 `.user-info`/`.el-dropdown`/`.el-avatar` 展开再点；并单列「按钮是否命中」断言 |
+| ⑭ | R3/R4 九条「登出后仍免登」FAIL，看着像 SLO 全崩 | portal「退出登录」在 `el-dropdown-menu` 内，**未展开时不在 DOM** → 脚本返回 `NO-BUTTON`，登出压根没触发 | 先展开下拉再点；并单列「按钮是否命中」断言 |
+| ⑮ | 补了「先点触发器」还是打不开下拉 | Element Plus `el-dropdown` 默认 **trigger = hover**，**点击无效** | 改用 `Input.dispatchMouseEvent type=mouseMoved` **悬浮**（先移到别处再移入，产生 mouseenter 迁移） |
+| ⑯ | SSO 登录停在登录页不动（第三次踩「点父节点」） | `click_txt` 的 selector 写成 `'button,a,li,span,div'` → 命中**祖先 div**，处理器在子 `button` 上、事件只向上冒泡 | **触发类点击一律只匹配 `button`**（`click_txt(txt,'button')`） |
+| ⑰ | 「登出后各应用不再免登」看着全绿，其实不证明任何事 | 前置判据写成 `'…/portal/' in url`，而 `/portal/login` **也含该子串** → 停在登录页被判成 PASS；下游「不再免登」只是「本来就没登录」 | 前置判据收紧为 **无密码框 AND url 不含 `/login` AND localStorage 有 token** |
 
 **通用心法**：
 - 断言要**有区分度**（例：白名单不能只看「无凭据 401 vs 404」—— 安全过滤器在 controller 之前就返回 401/403，白名单根本没被执行到；要**带真实会话**或**验产物字节码**）。

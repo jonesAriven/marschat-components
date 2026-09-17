@@ -459,7 +459,8 @@ apis:                       # ⚠️ api 点任何模式都不自动授予，写
 | **35** | **身份只能以「验签通过的令牌声明」为准，请求体里的自述字段不得作为准入条件** —— 对自述字段硬校验不增加安全性（会话主体本就来自令牌），却会把「客户端取错字段」放大成「整条通道不可用」 | 同上；修复后请求体 `username` 降至 WARN 级 |
 | **36** | **改密端点是「会真改口令」的写操作，探测前必须先备好回滚** —— 「我就打一发看看返回什么」会在你不知情时把共享账号口令改掉（2026-09-18 实测踩中：探测 portal 改密后本地口令即变，探测 kb-web 改密后**中心口令**即变） | 定位改用「错误旧口令应当被拒」这类**不产生副作用**的负例；确需正例时先记录原值/准备还原路径并复核中心登录恢复 |
 | **37** | **Console 里的「Failed to load resource: 404」不含 URL** —— 只看 `Log.entryAdded` 无法定性，容易把「一处 favicon」误判成「六个应用各有问题」 | 必须配合 `Network.responseReceived` 抓 URL；本轮据此把 6 条 404 收敛为同一个 `auth.marschat.online/favicon.ico`（已修） |
-| **38** | **Element Plus 下拉（`el-dropdown-menu`）未展开时不在 DOM** —— 自动化直接找「退出登录」按钮会 `NO-BUTTON`，导致登出根本没触发、下游断言连带全红 | 先点触发器（`.user-info` / `.el-dropdown` / `.el-avatar`）展开再点菜单项；并把「按钮是否命中」单列一条断言，避免把「没点到」读成「功能坏了」 |
+| **38** | **Element Plus 下拉（`el-dropdown-menu`）未展开时不在 DOM，且默认 trigger 是 `hover` 不是 click** —— 自动化直接找「退出登录」按钮会 `NO-BUTTON`；补了「先点触发器」仍打不开（点击对 hover 无效） | 用 `Input.dispatchMouseEvent type=mouseMoved` **悬浮**触发（先移开再移入）；并把「按钮是否命中」单列一条断言，避免把「没点到」读成「功能坏了」 |
+| **39** | **断言子串要防「包含即通过」** —— 判据写 `'…/portal/' in url` 时，`/portal/login` 也含该子串，会「停在登录页却判 PASS」，下游断言全是假绿 | 登录态判据收紧为**三条件同时成立**：无密码框 + url 不含 `/login` + localStorage 有 token |
 
 ---
 
