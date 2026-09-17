@@ -82,6 +82,28 @@
 | **修复范式（已落地，其它应用可照抄）** | ① 前端与后端**同序同名**取 `username → preferred_username → sub`；② 后端**身份一律以验签令牌声明为准**，请求体 username 降级为客户端自述 —— 不一致记 WARN 不阻断。硬校验并不增加安全性（会话主体本就来自验签令牌），却会把「客户端取错字段」放大成「整条 SSO 通道不可用」 |
 | **验证** | `GET /activecode/api/auth/session`（带会话）→ 期望 `{"username":"admin","success":true}`；`localStorage.activecode_sso_user` 应为 `admin`（修复前是 `"1"`） |
 
+### 1.7 改密「显示成功」但别的应用还是老口令（身份分裂）
+
+| 项 | 内容 |
+|---|---|
+| **症状** | 在某应用改密 → 提示「修改成功」，但用新口令登其它应用失败；用**旧**口令登其它应用反而成功 |
+| **定位** | ① 该应用的改密端点改的是**哪里**：本地影子表（缺陷）还是中心（正确）；② 改完立刻用新旧两个口令分别打**中心** `/auth/login` 对比 |
+| **根因（2026-09-18 实测）** | portal / activecode 的本地改密端点做的是「本地 salt/bcrypt 比对 + 改本地影子表」，**中心口令纹丝不动** ⇒ 同一用户名两套口令 |
+| **现状** | **已修**：两端点下线为 **410 Gone** + 引导走中心；portal 下拉改「重置密码（走统一认证）」 |
+| **正确范式** | kb-web：`PUT /kb/api/user/password` → kb-gateway `application.yml:86` 的 `/kb/api/user/**` 路由 → 中心，实测真改中心口令 |
+| ⚠️ **排查纪律** | 改密端点是**会真改口令的写操作**。定位时优先用「错误旧口令应被拒」的**负例**；确需正例必须**先备还原路径**并在事后复核中心登录恢复（本轮踩中过一次） |
+
+### 1.8 每个应用 Console 都有「Failed to load resource: 404」
+
+| 项 | 内容 |
+|---|---|
+| **症状** | 六应用 SSO 流程各带一条 404，文本里**没有 URL** |
+| **定位** | `Log.entryAdded` 只给文本。必须配合 `Network.responseReceived` 抓 URL —— 本轮抓到真身是 `https://auth.marschat.online/favicon.ico`（浏览器停 IdP 登录页时自动请求） |
+| **根因** | 该路径落 auth-center 链3 的 `anyRequest().authenticated()` → 直连 8085 实测 403，经公网入口回落 404 |
+| **现状** | **已修**：链3 显式 `permitAll("/favicon.ico")` + `static/favicon.ico` |
+
+---
+
 ## 2. 权限类
 
 ### 2.1 登录后侧边栏一片空白
@@ -222,6 +244,8 @@ python3 woodScript/trigger-pipeline.py <项目名>                            # 
 | ⑩ | 「点了登录没反应」（同类第 3 次） | 按文本长度排序取到**父节点**（`div.el-form-item` 与内部 `<button>` 文本同长）→ 点父节点无效（事件只向上冒泡） | 精确匹配 `button` **全等文本** + 派发真实鼠标事件到其 bbox 中心 |
 | ⑪ | 独立登录「失败」（4 个应用） | 断言写成「**任何** toast 都算失败」，而 toast 正是成功提示「登录成功」 | 成功判据用「落点 URL + 登录接口 200 + 无密码框」，**不要用「无 toast」** |
 | ⑫ | portal 特征词不匹配 | 特征词抄自**登录页的营销文案**（「工具看板」），登录后页面是侧边栏文案 | 同 8 |
+| ⑬ | 5 应用 × 2 轮共 10 条「跨域直连中心」FAIL | 证据全是 `https://auth.marschat.online/auth/session` —— 这是**设计内的 SLO 会话探针**（auth-center 链2 显式 permitAll + 带凭据 CORS），各应用 `startSessionWatcher` 靠它做登出联动 | 违规判据收窄为「跨域 `/admin/**`」或「跨域提交账密 `/auth/login`」 |
+| ⑭ | R3/R4 九条「登出后仍免登」FAIL，看着像 SLO 全崩 | portal「退出登录」在 `el-dropdown-menu` 内，**未展开时不在 DOM** → 脚本返回 `NO-BUTTON`，登出压根没触发 | 先点 `.user-info`/`.el-dropdown`/`.el-avatar` 展开再点；并单列「按钮是否命中」断言 |
 
 **通用心法**：
 - 断言要**有区分度**（例：白名单不能只看「无凭据 401 vs 404」—— 安全过滤器在 controller 之前就返回 401/403，白名单根本没被执行到；要**带真实会话**或**验产物字节码**）。

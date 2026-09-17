@@ -308,6 +308,7 @@ git -C /root/devtools ls-remote origin dev; git -C /root/devtools ls-remote $(gi
 | `README.md` | 统一认证平台权威手册（设计 / 接入 / 使用运维） |
 | `PHASE12-PROGRESS-2026-09-16.md` | Phase 12 进度交接快照（9-16 18:00 视角） |
 | **`PHASE12-SUMMARY-2026-09-17.md`** | **本文** —— Phase 12 收口汇总 + 剩余项与决策清单 |
+| **`PHASE12-ROUND6-2026-09-18.md`** | R6 多轮浏览器回归（SSO + 独立登录双通道）+ D2/D3 缺陷修复 + 2 条测试误判 |
 
 **workspace 文档（`C:\Users\13871\WorkBuddy\2026-09-16-01-25-17\docs\`）**
 | 文件 | 内容 |
@@ -434,6 +435,23 @@ git -C /root/devtools ls-remote origin dev; git -C /root/devtools ls-remote $(gi
 | 需**拍板** | F1 密钥轮换 / 3.2-B 令牌分离 / auto-git-sync 处置 / auth-center `715b41e` 推送 |
 | 需**发版工程** | 应用台 Membership API path 化（组件契约 + 6 宿主页 + activecode 手写页） |
 | 需**协同** | apps-registry 明文 secret 改 env-only（改 `clients.yml` 会触发 auth-center 枢纽重建） |
-| 低优先 | 本地改密端点下线（P1-4）、cosmic `/admin` 改名、UMD 重建（§2.7）、CI UMD 同步 wiring |
+| 低优先 | ~~本地改密端点下线（P1-4）~~ **R6 已闭合**、cosmic `/admin` 改名、UMD 重建（§2.7）、CI UMD 同步 wiring |
 
-*生成：2026-09-17 · 依据：WorkBuddy 会话归档 17 份 + mykng 线上实测 + 源码实读 · 维护人：接手 Phase 12 的下一轮执行者*
+---
+
+## 12. 追加 · R6 多轮浏览器回归与缺陷修复（2026-09-18 凌晨）
+
+> 详见 **`docs/PHASE12-ROUND6-2026-09-18.md`**（本轮完整证据与误判清单）。摘要：
+
+| # | 项 | 结果 |
+|---|---|---|
+| 1 | SSO 免登 6/6、深链拦截 6/6、401 静默续期 2/2、登录方式可达性 5/5、独立账密登录 5 应用 × 2 轮全绿 | ✅ |
+| 2 | 🔴 **D2 高危**：portal / activecode 本地改密端点**真改本地影子口令**（中心不变 → 身份分裂） | ✅ 已修：端点 410 Gone + portal 下拉改「重置密码（走统一认证）」，提交 `ad356c90` |
+| 3 | 🟡 **D3 低危**：`auth.marschat.online/favicon.ico` 403/404，六应用 SSO 全程各一条 console 报错 | ✅ 已修：permitAll + 静态图标，提交 `509c4de` |
+| 4 | 🟢 认知订正：kb-web「修改密码」经 kb-gateway 代理到中心，是**正确范式**，应推广 | 已写入手册 §6.0 |
+| 5 | 测试脚本误判 ×2（跨域 `/auth/session` 是 SLO 探针；「退出登录」在 Element Plus 下拉内未展开时不在 DOM） | 已登记 `TROUBLESHOOTING.md` §6 ⑬⑭ |
+| 6 | kb-web `[api] 请求失败`、infra 一条 401：专项复跑 3 轮 0 命中 | 登记待观察，不臆断 |
+
+> ⚠️ **排查纪律（新增）**：改密端点是**会真改口令的写操作** —— 本轮探测过程中曾真的改掉本地/中心口令，均已还原并复核。定位一律优先用「错误旧口令应被拒」的负例。
+
+*生成：2026-09-17（§1-§11）· 2026-09-18 追加 §12 · 依据：WorkBuddy 会话归档 17 份 + mykng 线上实测 + 源码实读 · 维护人：接手 Phase 12 的下一轮执行者*
