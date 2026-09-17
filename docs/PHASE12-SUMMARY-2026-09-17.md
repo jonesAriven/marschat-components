@@ -16,6 +16,7 @@
 | 4 | 🔴 **新发现（本轮）**：`marschat-auth-core.umd.js` 内 `version = "0.8.7"`，而 `VENDORED-auth-core-umd.md` 已标注 `0.8.8`——**UMD 未按 0.8.8 重新构建，只改了版本戳**，破坏「版本/大小/sha256 三对齐」。 |
 | 5 | **剩余项集中在 3 类**：① 权限下沉的**第二层**（应用台 path 化 Membership API、kb-ops 假闸门整改）；② 4 项**待良哥拍板**（F1 密钥轮换 / 3.2-B 令牌分离 / auto-git-sync 处置 / auth-center 715b41e 推送）；③ 低危收口（BFF 重复 client 参数、apps-registry 明文 secret 默认值、文档漂移、cosmic 路由改名）。 |
 | 6 | **R4 收口（09-17 下午）已落地**：BFF 重复 `client` 参数（HPP）加固 ×3、kb-ops「菜单授权」页修复（R3 遗留坏功能）、kb-ops 菜单授权页签守卫、portal 0-public 注释。提交 `1061d2d`，流水线 #811/#812/#814/#815 全 SUCCESS；已闭合 §4 的 P2-1 / P1-3 / P2-5，并把 P2-9 / P2-10 结案。详见 §10。 |
+| 7 | **R5 收口（09-17 晚）已落地**：kb-ops「假闸门」整改（10 个 Controller 补 25 个 api 写点 + SyncController 补闸门）+ 浏览器级 E2E A~F 全通过 + 已认证端到端（R3 遗留）闭合。提交 `88aa2c3`，流水线 #816 SUCCESS。详见 §11。 |
 
 ---
 
@@ -362,6 +363,77 @@ git -C /root/devtools ls-remote origin dev; git -C /root/devtools ls-remote $(gi
 | 需**协同**（同窗口） | kb-ops 假闸门整改（24 个 api 点，须与中心授权同时执行，否则立即「点了就报错」）；apps-registry 明文 secret 改 env-only（改 `clients.yml` 会触发 auth-center 枢纽重建） |
 | 需**发版工程** | 应用台 Membership API path 化（组件契约 + 6 宿主页 + activecode 手写页） |
 | 需**真浏览器 + 真实账号** | E2E 场景 B~F、已认证端到端验收 |
+| 低优先 | 本地改密端点下线（P1-4）、cosmic `/admin` 改名、UMD 重建（§2.7）、CI UMD 同步 wiring |
+
+---
+
+## 11. 追加 · R5 收口（2026-09-17 晚）
+
+> 本轮按良哥指示执行「item 2（kb-ops 假闸门整改）+ item 3（E2E B~F 与已认证端到端）」。
+> 提交 `88aa2c3`（devtools `dev`，Gitee + GitHub 双推，`ls-remote` 三方一致）；流水线 **#816 kb-ops SUCCESS**。
+
+### 11.1 item 2 · kb-ops「假闸门」整改（已上线 + 功能级验证）
+
+**问题**：10 个 Controller 只有**类级** `@RequirePermission("menu:xxx")` —— 给某人开菜单＝同时给了写权限；`SyncController` 更是**完全无权限注解**（任意登录用户可触发全量同步）。
+
+**改动**（与既合规的 `HostController` 范式完全一致：类级 `menu:*` 保留为访问闸门 + 方法级 `api:*` 作为写闸门）：
+
+| 范围 | 内容 |
+|---|---|
+| 25 个写点 | `services/ports/credentials/domains/dependencies/knowledge` × create·update·delete（18）、`deployments:create`、`conflicts:detect`·`resolve`、`import:exec`·`csv`、`dashboard:refresh`、**`sync:run`** |
+| `SyncController` | 补 `import` + `@RequirePermission("api:sync:run")`（全仓无调用方，零回归） |
+| `menu-registry.yml` | `apis` 段 **3 → 28** 个权限点 |
+
+**授权影响与实测（关键）**：
+
+| 项 | 结果 |
+|---|---|
+| 新增权限点注册 | ✅ 中心 `sys_permission` kb-ops api 点 **3 → 28** |
+| 应用管理员加法补齐 | ✅ **role 78（应用管理员）自动获得 28/28**，无遗漏（上线前已实测该机制有效） |
+| 活跃用户 | 仅 `admin`(超管) + `p10x`(常驻回归) —— 本次上线实际影响面最小 |
+| 超管放行 | `POST /ops/service` → **400**（过闸门落参数校验）、`POST /ops/port` → **500**、`POST /ops/dashboard/snapshot/refresh` → **200** |
+| 🔴 **决定性证据** | 只授 `menu:services`、**不授任何 api 点**时：`GET /ops/service/list` → **200**；`POST /ops/service`、`DELETE /ops/service/999999` → **403** ⇒「**开菜单 ≠ 给写权限**」成立 |
+| 无闸门写接口已封堵 | 低权用户 `POST /ops/sync/from-intelligence` → **403**（整改前该接口无任何权限注解） |
+| 现场还原 | role 15 权限绑定精确还原为空；两个临时探针账号（435/442）已墓碑；活跃用户仍为 2；kb-ops 成员行数回到基线 2 |
+
+> 附带验证：R1 的 path 化端点 `PUT /admin/clients/{cid}/users/{uid}/roles` 工作正常。
+
+### 11.2 item 3 · 浏览器级 E2E（A~F）+ 已认证端到端
+
+**环境**：mykng `headless chromium + CDP`（Python `websockets` 直连）；因本机 `/etc/hosts` 把 `kb/ops.marschat.online` 钉到 127.0.0.1，用 `--host-resolver-rules` 指向公网入口 `1.117.70.30`，走真实用户路径。
+
+| 场景 | 内容 | 结果 |
+|---|---|---|
+| **A** | SSO 单点免登：portal 未登录→点 SSO→IdP 登录一次→回跳；再访问 kb-web / kb-ops / infra / cosmic / activecode | ✅ **5/5 全部免登**；**口令输入总次数 = 1**（铁律达标） |
+| **B** | 应用登录页独立账密登录（BFF→中心） | ✅ 成功进入 `/portal/` |
+| **C1/C2** | 邮箱验证码：发送反馈 + 60s 频控 | ✅ 「验证码已发送」/「**验证码发送过于频繁，请 60 秒后再试**」 |
+| **C3** | 忘记密码入口 → 四步找回第 1 步 | ✅ 出现「请输入您的注册邮箱，我们将发送验证码」+ 发送验证码 + 返回登录 |
+| **D1/D2** | 错误提示文案 | ✅ 错误口令与**不存在账号返回同一文案「用户名或密码错误」**（正确的防枚举设计） |
+| **E** | P0-1 免登短路回归：带 IdP 会话重访登录页 | ✅ 自动免登，无密码框 |
+| **F** | P0-3 activecode 匿名闸门回归 | ✅ 匿名 `POST /activation/generate` → **401**；匿名 `GET /config/default-expire` → **401**；自助页「有效期」因被拦未加载 |
+
+**已认证端到端（闭合 §4.1 P1-5 的 R3 遗留）**：
+
+| 验证 | 结果 |
+|---|---|
+| 真实会话 token 打 kb-ops BFF | `GET /admin/users?client=marschat-kbops` **200**；`/admin/permissions?client=marschat-kbops` **200**、`/admin/roles/78/permission-codes` **200**（R4 新放行生效）；重复 `client` **404**（R4 HPP 生效）；`/admin/authorization-matrix` **404**（未登记仍拒） |
+| 浏览器级 · kb-ops `/ops/users` | 页签 `[用户, 菜单授权, 账号映射]` 对超管**全部可见**（R4 守卫不误伤超管）；用户列表正常加载 |
+| 浏览器级 · kb-web `/kb/users` | 列表正常加载（R3 同源化端到端成立） |
+
+**未执行 / 边界**：邮箱验证码**闭环**需真实邮箱收码，本轮只验到「发送 + 频控 + 错误文案」；发送到不存在邮箱不会产生真实邮件。
+
+**测试脚本自身 3 次误判（已修正，非产品缺陷，登记以免后人重踩）**：
+① `querySelectorAll('*')` 取「忘记密码」时命中 `body` → 点击无效；
+② 点中了父 `div`（宽 342px 的中心空白）而事件处理器在**子 `<a>`** 上，且事件只向上冒泡 → 无反应；
+③ Toast 抓取时机不对（读取时已消失）→ 改用 `MutationObserver` 后才拿到真实文案。
+
+### 11.3 R5 后仍未做
+
+| 类别 | 项 |
+|---|---|
+| 需**拍板** | F1 密钥轮换 / 3.2-B 令牌分离 / auto-git-sync 处置 / auth-center `715b41e` 推送 |
+| 需**发版工程** | 应用台 Membership API path 化（组件契约 + 6 宿主页 + activecode 手写页） |
+| 需**协同** | apps-registry 明文 secret 改 env-only（改 `clients.yml` 会触发 auth-center 枢纽重建） |
 | 低优先 | 本地改密端点下线（P1-4）、cosmic `/admin` 改名、UMD 重建（§2.7）、CI UMD 同步 wiring |
 
 *生成：2026-09-17 · 依据：WorkBuddy 会话归档 17 份 + mykng 线上实测 + 源码实读 · 维护人：接手 Phase 12 的下一轮执行者*
