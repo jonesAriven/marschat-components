@@ -1,6 +1,6 @@
 # 排查手册 · 统一认证平台（症状 → 定位 → 根因）
 
-> 配套：`README.md`（权威手册：设计 / 接入 / 使用运维）· `PHASE12-SUMMARY-2026-09-17.md`（收口汇总）
+> 配套：`README.md`（权威手册：设计 / 接入 / 使用运维）· `STATUS.md`（未决项与待办）· `CONFIG-REFERENCE.md`（配置项与环境变量全表）
 > **用法**：按「症状」检索 → 按「定位路径」逐跳验证 → 对号「根因」。**禁止跳步猜根因**（铁律 `trace_terminal`）。
 > 本文不含任何口令 / secret 明文；凭据见 Vaultwarden（`vault.marschat.online`）或 infrastructure-map 技能。
 
@@ -266,3 +266,58 @@ python3 woodScript/trigger-pipeline.py <项目名>                            # 
 | 某应用 BFF 404 / 白名单缺项 | 该应用仓库（`AdminProxyController`） |
 | 组件交互（按钮/作用域/弹窗） | `marschat-components`（**改一处 6 应用生效**，必须整体回归） |
 | 流水线不触发 / 构建失败 | devtools `woodScript/`（先查 `.woodpecker.yml` 的 `when` 闸门与 `DEPLOY_TARGET`） |
+
+---
+
+## 8. portal「被踢回登录页」与登录链路约定陷阱（2026-09-18/19 专项）
+
+> 完整证据、实验记录与未证实边界见 `archive/portal-401/`。本节只留**可操作的排查路径**。
+> ⚠️ 代码行号是当时的锚点，代码演进后会位移 —— 以**文件 + 语义**为准。
+
+### 8.1 先分清两条链路（**多数排查弯路源于混淆这两条**）
+
+| 链路 | 触发点 | 现象 | 判据 |
+|---|---|---|---|
+| **A · 真 401 硬踢** | 前端请求拦截器收到**真 HTTP 401** | 立即清会话 + 跳 `/portal/login?reauth=1` | 有真 401 |
+| **B · 身份守卫静默重授权** | `main.ts` 身份守卫发现本地身份与 IdP 不一致 | 停在 `/portal/auth/callback?code=…`，`POST /portal/api/auth/sso/exchange` **根本没发出**，`portal_token=null` | **全程 0 个 `/portal/api/**` 401** |
+
+⇒ 先看 network 里有没有真 401：**没有真 401 就不是链路 A**。
+
+### 8.2 只有「真 401」才会硬踢（关键区分）
+
+| 来源 | HTTP | 是否硬踢 |
+|---|---|---|
+| 业务异常（`BusinessException(401)`） | **200**，body 里 `code:401` | ❌ 仅 reject，不跳 |
+| 权限不足 | **403** | ❌ |
+| 后端 `JwtInterceptor` 的 `SC_UNAUTHORIZED` | **真 401** | ✅ 硬跳 |
+
+⇒ 排查时先看 **HTTP status**，别被 body 里的 `code:401` 带走。全平台唯一真 401 发射点 = 后端 `JwtInterceptor`。
+
+### 8.3 可观测性：用 E0 采样日志定格 reason
+
+- 坑：`JwtInterceptor` 的「无 Bearer / 验签失败」分支**原本完全不打日志** → 日志里「未登录」计数为 0 **不能**说明该分支没发生。
+- 已补 **E0 结构化采样日志**：`reason ∈ {NO_BEARER, BAD_SIGNATURE, EXPIRED, ISSUER_MISMATCH, TYPE_MISMATCH}`，只记 `sha256(token)` 前 8 位，**严禁记录原始 token**。
+- 用法：抓 `portal-server` 日志按 `reason` 分布判断，**不要**再靠猜。
+
+### 8.4 🔴 约定陷阱（**禁止项**）：`GET /auth/session` 的 `username` 实际返回 `sub`
+
+- 该字段取 `auth.getName()`，回的是 **`sub`（用户 ID，如 `"1"`）而非用户名**。
+- 组件库身份一致性守卫（`sessionWatcher`）与应用侧 `getLocalIdentity` 注入**正静默依赖这个语义**（**6 个应用全部注入**，非仅 infra）。
+- ⇒ **在未同步修改 `getLocalIdentity` 值域之前，不得"善意修正"该字段语义** —— 改了会让所有应用每次探针都判「身份错位」，**集体被踢回登录页**。
+
+### 8.5 另一处已知缺陷（**不是**硬踢的原因，勿误归因）
+
+`AuthCenterService.refreshTokens`：进程内 `Map<Long,String>`，**键 = userId 单槽、无锁**；SSO 路径写入 / legacy 路径消费；刷新失败时把非唯一键（null）当唯一键删除 → 产出 `invalid_grant` + 「SSO 会话已失效」。
+⚠️ 但它产出的是 **HTTP 200 + `code:401`（不硬踢）** ⇒ 它是硬踢症状的**红鲱鱼**，不能解释真 401。
+
+### 8.6 未证实边界（**不得表述为已确认缺陷**）
+
+- 「**真实用户会被踢**」至今未被证实：全部观测来自自动化夹具；7 次命中按小时仅落 3 个桶，且与测试窗口一一对齐 ⇒ **高度疑似夹具自触发**。
+- portal 自签 token **逻辑上不可能**触发该分支（已反编译在跑 jar 证实恒写 `iss` + `typ='portal'`）⇒ 触发面收窄到「另有进程/构建持同一 secret 但签发规则不同」。
+- 对外口径只能是「**portal 存在一条会硬踢的 401 处理路径**」，**不能**说「portal 有并发被踢缺陷」。
+
+### 8.7 测试方法论（避免自己的测试污染结论）
+
+- **双浏览器多会话矩阵**：两个独立 `--user-data-dir` 视为两台浏览器；用例 S1 双 SSO 同账号 / S2 双独立同账号 / S3 混合 / S4 反向混合 / S5 异账号；每用例**等 70s**（> sessionWatcher 60s）；全程 `Network.setCacheDisabled=true`。
+- **CDP `Network.getResponseBody` 必须发往页面 session**（带 `sessionId`）—— 发到 browser 作用域会返回 `-32601`。这是历史上「抓不到响应体」类结论的直接来源。
+- **冻结实验**：制造真 401 会在生产日志留痕、污染后验基线 ⇒ 需要干净基线时，先停掉一切并发会话实验。

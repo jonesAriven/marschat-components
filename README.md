@@ -13,7 +13,7 @@
 
 | 包名 | 版本 | 说明 |
 |------|------|------|
-| `@marschat/auth-components` | `0.8.6` | 认证 UI（LoginPage/LoginPanel/SsoCallbackView）+ SSO client（PKCE/静默免登/续期）+ 用户管理面板×5 + PermissionGate + usePermissions/useMenus |
+| `@marschat/auth-components` | `0.8.8` | 认证 UI（LoginPage/LoginPanel/SsoCallbackView）+ SSO client（PKCE/静默免登/续期）+ 用户管理面板×4（platform\|app 双作用域）+ PermissionGate + usePermissions/useMenus |
 | `@marschat/frontend-common` | `0.3.5` | createRequest（401 静默续期拦截器）、createAuthGuard 路由守卫、TokenStore、SidebarMenu |
 
 ### Java Maven 包 (`java/`)
@@ -23,7 +23,7 @@
 | `common-core` | `1.1.6` | 公共核心库（Result、异常处理、链路追踪、MyBatis-Plus 配置、事件总线） |
 | `auth-core` | `2.1.6` | 认证公共库（HS256 TokenProvider、RS256/JWKS OidcTokenVerifier、@MarsUser、@RequirePermission、菜单上报、Feign 透传） |
 
-> 版本基线 2026-09-15（Phase 10 收口后线上实测态）。升级前请核对 `docs/README.md` 的版本基线行。
+> 版本基线 **2026-09-18**（Phase 12 收口后线上实测态）。升级前请核对 `docs/README.md` 的版本基线行与 `docs/CONFIG-REFERENCE.md` 的配置全表。
 
 ## 🚀 快速开始
 
@@ -60,7 +60,7 @@ pnpm build:all
 ```
 marschat-components/
 ├── packages/                    # 前端 npm 包
-│   ├── auth-components/         #   认证 UI + SSO client（0.8.6）
+│   ├── auth-components/         #   认证 UI + SSO client（0.8.8）
 │   │   ├── src/
 │   │   │   ├── components/      #     LoginPage / LoginPanel / SsoCallbackView
 │   │   │   │                    #     UserManagementPanel（platform|app 双作用域）
@@ -192,15 +192,26 @@ pnpm publish
 
 ## 📚 文档
 
+**平台文档**（`docs/`，权威级别从高到低）
+
 | 文档 | 内容 |
 |------|------|
-| **[docs/README.md](./docs/README.md)** | 🔥 **唯一权威手册（从这里开始）**：设计篇 / 接入篇（Level 0-3 + 静态页模式）/ 运维篇 + 20 条踩坑铁律 |
+| **[docs/README.md](./docs/README.md)** | 🔥 **权威手册（从这里开始）**：设计篇 / 接入篇（Level 0–5，含无构建静态页）/ 使用运维篇 + 39 条踩坑铁律 |
+| **[docs/STATUS.md](./docs/STATUS.md)** | ⏳ **未决项与待办**（唯一权威）：优先级清单 + 待拍板 + 已知取舍 + 下一轮路线 —— **接手先读** |
+| **[docs/CONFIG-REFERENCE.md](./docs/CONFIG-REFERENCE.md)** | 配置项 / 环境变量 / 端点 / 已注册 client / 数据库真源 全表 |
+| [docs/TROUBLESHOOTING.md](./docs/TROUBLESHOOTING.md) | 排查手册：症状 → 定位 → 根因 + 取证命令集 |
+| `docs/VERIFY-REPORT-2026-09-17.md`、`docs/PHASE12-ROUND6-2026-09-18.md` | 验证与回归快照（历史证据） |
+
+**包内组件用法**
+
+| 文档 | 内容 |
+|------|------|
 | [packages/auth-components/README.md](./packages/auth-components/README.md) | 认证组件 API（LoginPage/LoginPanel/SsoCallbackView/各管理面板） |
 | [packages/auth-components/LOGIN-PAGE-USAGE.md](./packages/auth-components/LOGIN-PAGE-USAGE.md) | 统一登录页用法（含 `showLocalLogin` / `showMailLogin` 两个易漏字段） |
 | [packages/auth-components/FORGOT-PASSWORD-USAGE.md](./packages/auth-components/FORGOT-PASSWORD-USAGE.md) | 忘记密码四步状态机 |
 | [packages/frontend-common/README.md](./packages/frontend-common/README.md) | createRequest / createAuthGuard / TokenStore |
 | [java/auth-core/README.md](./java/auth-core/README.md) | 后端验签与权限注解 |
-| `devtools/docs/adr/` | 架构决策记录，最新为 `ADR-2026-09-15-Phase11-统一登录与用户管理收敛.md` |
+| `devtools/docs/adr/` | 架构决策记录（决策史），最新为 `ADR-2026-09-16-Phase12-统一认证权限治理.md`；索引见同目录 `INDEX.md` |
 
 > ⚠️ 早期曾存在 `docs/INTEGRATION-GUIDE.md`、`docs/SSO-IMPLEMENTATION-SUMMARY.md`、`docs/ADR-SSO-Cookie-Domain-Sharing.md`、`docs/AUTH-CENTER-COOKIE-GUIDE.md`、`docs/APP-UPGRADE-GUIDE.md` 等 7 份文档，**已全部合并进 `docs/README.md` 并从仓库删除**，旧链接会 404，勿再引用（沿革见 docs/README.md 文末附录）。
 

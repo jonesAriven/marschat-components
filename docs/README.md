@@ -1,26 +1,33 @@
 # MarsChat 统一认证平台手册（设计 · 接入 · 使用运维）
 
-> **本文是统一认证平台的唯一权威文档**，合并并取代本目录原有 7 份零散文档（见文末附录《文档沿革》）。
+> **本文是统一认证平台「现行设计与接入」的唯一权威**，合并并取代本目录原有 7 份零散文档（见文末附录《文档沿革》）。
 > 受众：新建自研系统的接入者、平台组件维护者、运维值班。
-> 权威演进全记录：`devtools/docs/adr/ADR-2026-09-10-平台重构Phase0清死代码.md`（§26-§37，本文与其口径一致，冲突时以 ADR 最新章节为准）。
+> **文档分工**：本文 = **现行态**（怎么设计 / 怎么接入 / 怎么运维）｜ `docs/STATUS.md` = **进行中**（未决项与待办）｜ `docs/TROUBLESHOOTING.md` = **故障排查**｜ `devtools/docs/adr/*` = **决策史**（当初为何这样定、走过哪些弯路）。
+> ⚠️ **冲突裁定**：同一事实若本文与 ADR 不一致，**以反映最新线上实测的一方为准，并当场回写本文**——不要两处各说各话（历史教训：手册与 ADR 长期漂移，如用户真源表名 `user` vs `sys_user`、F1 密钥共享处数、Phase 11 待办状态）。
 >
-> **版本基线（2026-09-16 Phase 12 进行中，全部为线上实测态）**
+> **版本基线（2026-09-18 实测态；配置项与环境变量全表见 `docs/CONFIG-REFERENCE.md`）**
 > `@marschat/auth-components` **0.8.8**（0.8.8 = app 作用域身份只读，D-3 收口；已发布 Nexus npm-hosted）｜ `@marschat/frontend-common` 0.3.5 ｜ `com.marschat:auth-core` **2.1.6** ｜ `com.marschat:common-core` 1.1.6
-> 6 应用（portal / activecode / kb-web / cosmic / kb-ops / infra-monitor）的**登录页、SSO、统一鉴权、权限体系**全部接入。
+> 6 应用（portal / activecode / kb-web / **cosmic-studio**（client-id，历史文档简写 cosmic）/ kb-ops / infra-monitor）的**登录页、SSO、统一鉴权、权限体系**全部接入。
 >
-> 📋 **Phase 12 进度交接快照**：`docs/PHASE12-PROGRESS-2026-09-16.md`（已完成/关键坑/未完成待办，接手先读）。
+> **📚 文档地图**（本目录）
 >
-> 📊 **Phase 12 收口汇总（截至 2026-09-17）**：`docs/PHASE12-SUMMARY-2026-09-17.md`（全量实测核验 + 已完成清单 + 剩余项与决策清单）。
+> | 文档 | 定位 | 时效 |
+> |---|---|---|
+> | `README.md`（本文） | 权威手册：设计 / 接入 / 使用运维 | **现行态**，随代码更新 |
+> | `STATUS.md` | **未决项与待办**：优先级清单 + 待拍板 + 已知取舍 + 下一轮路线 | 现行态，**接手先读** |
+> | `CONFIG-REFERENCE.md` | 配置项 / 环境变量 / 端点 / 已注册 client / 数据库真源 全表 | 现行态，随 registry 更新 |
+> | `TROUBLESHOOTING.md` | 排查手册：症状 → 定位 → 根因 + 取证命令集 | 现行态 |
+> | `VERIFY-REPORT-2026-09-17.md` | Phase 12 全量验证报告（102 用例 / 0 真实失败） | 快照（2026-09-17） |
+> | `PHASE12-ROUND6-2026-09-18.md` | R6 多轮浏览器回归与缺陷修复证据 | 快照（2026-09-18） |
+> | `PHASE12-SUMMARY-2026-09-17.md` | Phase 12 收口汇总（**结论已吸收进 `STATUS.md`**） | 历史快照（勿单独引用） |
+> | `PHASE12-PROGRESS-2026-09-16.md` | Phase 12 进度快照（**已被 SUMMARY 取代**） | 历史快照（勿单独引用） |
+> | `devtools/docs/adr/*.md` | ADR 决策史（Phase 0–12 全过程，含 §38 归档容器） | 决策史，勿当现行态 |
+> | `archive/` | **归档**：22 份历史与过程材料（Phase 12 设计规格 / portal 401 专项 / Phase 11 复盘 / activecode UMD 机制） | 历史，勿当现行态 —— 索引见 `archive/README.md` |
 >
-> 🛠 **排查手册（症状 → 定位 → 根因）**：`docs/TROUBLESHOOTING.md`（含取证命令集与「已知误判清单」）。
->
-> 🧪 **Phase 12 全量验证报告**：`docs/VERIFY-REPORT-2026-09-17.md`（102 用例 / 0 真实失败）。
->
-> 🔁 **Phase 12 R6 多轮浏览器回归与缺陷修复（2026-09-18）**：`docs/PHASE12-ROUND6-2026-09-18.md`（SSO + 独立登录双通道全绿；修复「本地改密造成身份分裂」高危缺陷与 favicon console 报错；登记 2 条测试误判）。
-> ⚠️ **Phase 11 修正**：Phase 10 曾写「初衷达成」，全量复核后发现**独立账密**这条路径此前仍是各应用本地校验（身份与口令分裂）。现已定型为「账密唯一真源在认证中心，应用 BFF 转发」（见 §6.0）：
-> ✅ 已落地：portal · infra-monitor · activecode · cosmic
-> ⬜ 待办：kb-web / kb-ops / kb-gateway（爆炸半径最大，需单独立项）
-> 详见 `devtools/docs/adr/ADR-2026-09-15-Phase11-统一登录与用户管理收敛.md`。
+> ⚠️ **Phase 11/12 修正（2026-09-15/16 两轮全量复核）**：Phase 10 曾写「初衷达成」，复核发现该结论**被高估**——「独立账密」路径此前仍是各应用本地校验（身份与口令分裂），且服务端并未真正区分「平台管理员 vs 应用管理员」。现已定型（详见 §6.0 / §8）：
+> ✅ **账密真源归一：六应用全部完成** —— portal / infra-monitor / activecode / cosmic-studio 经 BFF 转发中心；**kb-web 账密早已由 kb-gateway 直转中心**、**kb-ops 无账密入口**（`showLocalLogin:false`）、kb-gateway 只验签不读写用户表（见 ADR-2026-09-15 §1.2 **D8，2026-09-16 更正**）。
+> 🚫 **kb 系严禁新增任何本地校验或双写** —— 真实风险不是「改造会把人挡在门外」，而是「误引入本地校验 / 双写导致大面积登录失败」。
+> 📌 **遗留与待办一律以 `docs/STATUS.md` 为准**（本手册不再重复维护待办清单，避免两处漂移）。
 
 ---
 
@@ -57,6 +64,7 @@ auth-center（:8085，唯一身份与授权真源）
 
 - 源：Nexus `nexus.marschat.online`（npm-*/maven-releases）；仓库：Gitee `jonesAriven/marschat-components`（monorepo）
 - **无构建前端**（纯静态页）用 UMD 产物 `marschat-auth-core.umd.js`（同步脚本 `devtools/woodScript/sync-auth-core-umd.sh`，版本戳 `VENDORED-auth-core-umd.md`，0.8.8 sha256 `be44ea0a…`）
+  - ⚠️ **已知溯源缺陷（P2-4 · 坑 #33）**：该 UMD 产物**自报 `version="0.8.7"`**，而 `VENDORED.md` 标 0.8.8 —— 0.8.7→0.8.8 发版时**只改了版本戳、未重建产物**。**功能无差异**（0.8.8 的变更全在 Vue 组件，UMD 入口不含），属流程/溯源问题。下次发版须强制重建 UMD，或给同步脚本加「版本戳 == 产物内 `version` 常量」门禁。
 
 ## 3. 令牌与信任域（三种令牌，务必分清）
 
@@ -109,7 +117,7 @@ auth-center（:8085，唯一身份与授权真源）
 
 ## 6. 用户统一管理与账号映射
 
-- 中心 `sys_user` 是唯一身份真源；应用本地账号（若有）经 **`LocalAccountReporter` 启动全量上报**至 `/internal/clients/{id}/accounts`（X-Client-Secret），中心按 username **自动认领**（`app_account_mapping`）。
+- 中心 **`user`** 表（另有 `user_identity`）是唯一身份真源 —— ⚠️ 真源表名**就是 `user`，不是 `sys_user`**（历史文档长期误写，P2-12；运维写 SQL 时勿照抄旧文档）；应用本地账号（若有）经 **`LocalAccountReporter` 启动全量上报**至 `/internal/clients/{id}/accounts`（X-Client-Secret），中心按 username **自动认领**（`app_account_mapping`）。
 - 应用侧登录收敛链：**本地同名 → 平台超管例外 → 中心账号映射 → 403**（禁止「未匹配即回退任意本地管理员」这类越权默认值）。
 - 用户级菜单减法：`sys_user_menu_override`（只能减法，60s 缓存生效）。
 - 账号上报仅**启动时**执行（已知边界：运行期新建本地账号不出现，需重启）。
@@ -140,29 +148,6 @@ auth-center（:8085，唯一身份与授权真源）
   - 参考实现：infra-monitor `AdminProxyController` + `CenterSessionStore`；portal `AuthCenterService.callAdmin`。
   - 账密登录成功后，务必把中心返回的 `accessToken` / `refreshToken` / `expiresIn` 一并保存（只取 `data.user` 是不够的）。
 
-### 6.1 两类用户管理菜单（一个管身份、一个管成员）
-
-自研应用**必须同时具备**两类菜单，由同一个 `UserManagementPanel` 以不同 `scope` 渲染，**职责不重叠**：
-
-| 维度 | A · 中心平台管理台（portal `/portal/admin`，`scope=platform`） | B · 各应用本系统用户（各应用 `/users`，`scope=app`） |
-|---|---|---|
-| 回答的问题 | 平台上有哪些**人** | **谁在我这个系统里**、能干什么 |
-| 生命周期 | ✅ 创建 / 启用停用 / 重置密码 / 删除（墓碑） | ❌ 不删身份，只有「移出本系统」 |
-| 身份字段 | ✅ 可编辑（用户名/邮箱/昵称/全局角色） | 只读展示 |
-| 本系统角色 | 经跨应用授权矩阵间接管 | ✅ 直接绑定/解绑 client 级角色 |
-| 跨系统权限 | ✅ 跨应用授权矩阵（用户 × 应用） | ❌ 看不到别的系统 |
-| 菜单可见性 | ✅ 全应用 menu+api 权限点授权 | ✅ 仅本系统**减法**（只能减，永不越权新增） |
-| 账号映射 | ✅ 统一身份 ↔ 各系统本地账号 | 只读 |
-| 新建用户 | ✅ 建即得平台身份 | ✅ 委托中心建 + 自动加入本系统（数据仍落中心） |
-| **重置密码** | ✅ 允许（平台级职责） | ❌ **移除**（口令是全局身份属性） |
-| **删除** | ✅ 墓碑，用户名不可复建 | ❌ 改为「移出本系统」= 解绑本应用全部角色，身份保留 |
-
-**为什么不合并**：① 身份的生老病死是平台事务，成员的进退是本系统事务，合并会让应用管理员拿到平台级删除权；② 符合各自使用习惯（应用管理员只想"给我的系统加个人"）；③ 未来加"用户组/部门/数据行级权限"只需在中心侧加维度，应用侧面板不动。
-
-**中心管理台为何寄生 portal**：portal 本身是"一个入口掌控所有内部系统"的平台门户，承载平台管理符合定位；新建 `auth-console` 前端要付出应用注册/部署/域名/流水线的长期成本，收益不抵。代价是必须在 UI 与文档上反复标注这是平台级而非 portal 级。
-
-**中心管理台四大页签**：统一用户（全平台身份 CRUD/停用/重置密码）· 跨应用授权（哪些账号有哪些系统）· 账号映射（本地↔中心，自动认领状态）· 角色与菜单授权（menu+api 权限点勾选，改后 60s 内应用侧生效）。
-
 ### 6.1 两类用户管理菜单（Phase 11 定型：一个管身份、一个管成员）
 
 自研应用**必须同时具备**下面两类菜单，它们由同一个 `UserManagementPanel` 组件以不同 `scope` 渲染，但**职责不重叠**：
@@ -188,7 +173,7 @@ auth-center（:8085，唯一身份与授权真源）
 
 - 每应用**独立** `JWT_SECRET`（≥64B 随机，禁 "Your…" 弱默认样式）；infra/portal 已互拒 401 实测。
 - `menu-report-secret`（菜单/账号上报）与 client_secret 由 apps-registry 生成，`/internal/**` 不在公网白名单；JWKS 走内网。
-- ⚠️ **遗留 F1（P2，待拍板轮换）**：kb-gateway 与 auth-center 共享 JWT_SECRET（指纹实证），中心 HS384 业务令牌可穿过网关 legacy 验签环；影响有界（闸门仍裁决）但密钥泄露半径横跨两域。修复方案见 ADR §37.9。
+- ⚠️ **遗留 F1（P2，待拍板轮换）**：**三处共用同一对称密钥** —— auth-center / kb-gateway / kb-ops（后者经 `MARSCHAT_AUTH_SECRET`），且为弱默认样式；中心 HS384 业务令牌可穿过网关 legacy 验签环。影响有界（闸门仍裁决）但密钥泄露半径横跨三域。**方案已出、待良哥拍板**：阶段 1 下游改 JWKS 公钥验签（共享面 3→1）→ 阶段 2 auth-center 双密钥过渡，**两阶段顺序不可颠倒**（阶段 1 会令 legacy HS 会话 401，需重登一次）。详见 ADR-2026-09-16 §7 与 `docs/STATUS.md`。
 - 📌 文档铁律：**任何文档不得出现明文密码/secret**，一律写「见 Vaultwarden（vault.marschat.online）或 infrastructure-map 技能」。
 
 ---
@@ -239,8 +224,11 @@ auth-center（:8085，唯一身份与授权真源）
 
 ---
 
+# 第二篇 接入
 
-> 标准参考实现（薄适配层四件套 + 后端三件套）：`devtools/infra-monitor/infra-monitor-{web,server}`。全程**不改 auth-center Java**。
+> 目标：新应用从零接入**统一登录 + 统一鉴权 + 权限体系**，全程**不改 auth-center Java**。
+> 标准参考实现（薄适配层四件套 + 后端三件套）：`devtools/infra-monitor/infra-monitor-{web,server}`。
+> 机器可读配置真源：`devtools/apps-registry.yml` + 各应用 `menu-registry.yml`；**字段语义、环境变量、端点全表见 `docs/CONFIG-REFERENCE.md`**。
 
 ## Level 0：注册进平台（约 10 分钟）
 
@@ -409,6 +397,9 @@ apis:                       # ⚠️ api 点任何模式都不自动授予，写
 > ③ 每个应用断言前**重置** console / 网络错误缓冲，否则会张冠李戴；
 > ④ 特征词与落地路径**从设计文档和登录后真实 `innerText` 里抄**，别拿登录页营销文案或大写猜写。
 
+## Level 5：无构建静态页（UMD）应用补充
+
+> 适用于**没有前端构建链**的纯静态页应用（当前仅 activecode 一个）。此类应用不走 Vue SPA 那套四件套，接入方式见下。
 
 1. **UMD**：`sync-auth-core-umd.sh` 把 `marschat-auth-core.umd.js`(0.8.8) 同步进应用静态目录，回写 `VENDORED-auth-core-umd.md`（版本/大小/sha256 三对齐，坑 #13 同源）。sso.js 只写薄适配：localStorage 键映射 + 换票后调 BFF。
 2. **后端 BFF 代理端点**（转发中心内网 `192.168.31.105:8085`，不暴露 secret）：
@@ -490,14 +481,23 @@ apis:                       # ⚠️ api 点任何模式都不自动授予，写
 
 **上线前清单**：SSO 免登（真浏览器禁缓存）· 独立账密+邮箱码登录 · 负例（错密/无 token 401）· 菜单权限（配置后 60s 生效；未配置 R10 放行）· 接口闸门（200/403/401 三态）· SLO 联动 · **换废票 E2E**（注垃圾 token→重载应恢复，暴露 #1/#2）· 三环境 redirect_uri。
 
-**平台常备测试资产**（`CodeBuddy 工作区 verify/phase10/`，回归口径见 ADR §37.5/.9/.10）：
-`wb_p10_regress.py`（A 六应用免登 / B 普通用户菜单收窄）· `wb_p10_d2.py`（身份切换双前缀）· `wb_p10_l3.py`（闸门 4 用例）· `wb_p10_l1.py`（activecode 邮箱码）· `wb_p10_r1_auth.py`（认证矩阵 21 例，含忘记密码全闭环）· `wb_p10_r2_sec.py`（令牌安全 23 例）· `wb_runall.py`（**6 应用并行全站点击巡检**，66 页 0 错误 0 弹窗）· `wb_p10_cap.py`（RS256 捕获）。临时普通账号：`POST /admin/users`（常驻回归账号 p10x，id=302）。
+**平台测试资产（现状：散落、未版本化，已登记待办 `T-REG-1`，见 `docs/STATUS.md`）**
+
+⚠️ 回归脚本目前存放于**各 WorkBuddy 会话工作区的 `verify/` 目录**，**未纳入任何仓库**，而会话工作区可被清理 → 文档一引用就可能断链。2026-09-19 核实后的实际留存：
+
+| 工作区（本机 `C:\Users\13871\WorkBuddy\`） | 内容 |
+|---|---|
+| `2026-09-15-01-28-04/verify/` | JS 脚本：登录矩阵 / 免登 / 权限负例 / SLO 登出（Phase 11） |
+| `2026-09-16-01-25-17/verify/` | Python `p12_*.py`：三层 API / D-7 / R8 / 邮箱码 / 网关闸门（Phase 12 R1） |
+| `automation-2026-09-17-22-43-53/verify/` | R6 回归：`indep_login.py`（独立登录）/ `logout_slo.py` / `probe404.py` 等 |
+| `2026-09-14-15-53-01/verify/wb_p10_baseline.py` | Phase 10 基线脚本（**仅此一份 `wb_p10_*` 尚存**） |
+
+- 历史文档提到的 `wb_p10_regress.py` / `wb_runall.py` 等一批 Phase 10 脚本**已随工作区清理而丢失**，不要再按旧名引用。
+- 常驻回归账号：`p10x`（id=302）。**测试务必用常驻低权账号** —— 用户名删除后有墓碑、不可复建（坑 #20）。
 
 > **Phase 12 全量验证（2026-09-17）**：**102 用例 / 0 真实失败**，结果与复现方式见 `docs/VERIFY-REPORT-2026-09-17.md`；覆盖平台基线、数据真源、6 应用接入面、三层权限边界、R8 自锁、BFF 白名单、HPP、浏览器级 SSO 免登与 app 作用域只读。
 >
-> **线上排查先看 `docs/TROUBLESHOOTING.md`**（症状 → 定位路径 → 根因 + 取证命令集 + 「已知误判清单」）。
->
-> 旧资产（Phase 10，Windows 侧浏览器驱动）在 CodeBuddy 工作区 `verify/phase10/`，依赖 `.workbuddy-ai/tools/wb_lib`；端点口径较旧，复用前先核对。
+> **线上排查先看 `docs/TROUBLESHOOTING.md`**（症状 → 定位路径 → 根因 + 取证命令集 + 「已知误判清单」）；**未决项与待办看 `docs/STATUS.md`**。
 
 ## 5. 组件发版
 
@@ -508,7 +508,9 @@ pnpm publish --filter @marschat/auth-components   #（+ frontend-common；Nexus 
 ```
 应用侧升级按坑 #13 三对齐，再走各应用 Woodpecker 流水线。UMD 同步目前为**人工步骤**（构建舱无 npm）——建议加 CI 门禁比对 VENDORED sha256（ADR §37.7）。
 
-## 6. 已知取舍与遗留（截至 2026-09-15，详见 ADR §37.7/.9）
+## 6. 已知取舍与遗留
+
+> 📌 **完整清单以 `docs/STATUS.md` 为准**（全量 P0/P1/P2 待办 + 待拍板项）；本表仅保留与手册日常使用直接相关的条目。
 
 | # | 项 | 处置 |
 |---|---|---|
