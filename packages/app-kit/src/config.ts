@@ -60,9 +60,26 @@ export interface AppOptionsInput {
   loginPath?: string
   callbackPath?: string
   usersPath?: string | false
+  /**
+   * 应用首页（站内路由内路径）。**建议每个应用显式传入。**
+   *
+   * 🔴 为什么不能靠默认值：它被路由守卫的 `onDeny` 真实消费 ——
+   * 无权限访问时 `router.replace(config.homePath)`，若该路径在本应用**不存在**，
+   * vue-router 匹配不到 → 静默停在空白页（不报错、守卫已 `replace` 过所以不重定向）。
+   * `DEFAULTS.homePath` 恰好是 `/dashboard` 只对「首页真叫 /dashboard」的应用成立，
+   * 这是**运气**而非约定，改默认值即批量静默 404。
+   */
   homePath?: string
   sessionMode?: SessionMode
   tokenKeyPrefix?: string
+  /**
+   * 显式令牌键覆盖 —— **优先级高于 `tokenKeyPrefix` 派生**。
+   *
+   * 用于令牌键不是 `<prefix>access_token` 形态的应用（如 portal 的 `portal_token`、
+   * cosmic 的裸 `token`）。逐字段覆盖：`undefined` 的字段仍走前缀派生，
+   * 所以只传一个键、其余保持派生的用法是被支持的。
+   */
+  tokenKeys?: Partial<TokenKeys>
   sessionProbeIntervalMs?: number
   whiteListPaths?: string[]
   /** 平台超管恒放行（默认 true）。 */
@@ -140,6 +157,34 @@ export function deriveTokenKeys(appId: string, prefix?: string): TokenKeys {
   }
 }
 
+/**
+ * 令牌键合并：**先按前缀派生，再逐字段用显式覆盖顶替**。
+ *
+ * 🔴 为什么是「派生后覆盖」而不是「有覆盖就不用派生」：
+ * 存量应用的四个键往往**只有一个**是非标准形态（portal 是 `portal_token`，
+ * 其余三个仍是 `portal_xxx`），若「传了 tokenKeys 就不派生」，
+ * 漏传的键会变成 `undefined` → localStorage 读到字面量 `"undefined"` →
+ * 老用户静默掉登录态。逐字段覆盖让「只覆盖一个」是安全用法。
+ *
+ * `undefined` 显式传参**不覆盖**（`{ accessTokenKey: undefined }` 等价于不传该字段）。
+ */
+export function mergeTokenKeys(
+  appId: string,
+  prefix?: string,
+  overrides?: Partial<TokenKeys>,
+): TokenKeys {
+  const derived = deriveTokenKeys(appId, prefix)
+  if (!overrides) {
+    return derived
+  }
+  return {
+    accessTokenKey: overrides.accessTokenKey ?? derived.accessTokenKey,
+    refreshTokenKey: overrides.refreshTokenKey ?? derived.refreshTokenKey,
+    tokenKindKey: overrides.tokenKindKey ?? derived.tokenKindKey,
+    idTokenKey: overrides.idTokenKey ?? derived.idTokenKey,
+  }
+}
+
 /** 三态取值：显式选项 > 运行时配置 > 内置默认。 */
 function pick<T>(option: T | undefined, runtime: T | undefined, fallback: T): T {
   if (option !== undefined && option !== null && option !== ('' as unknown as T)) {
@@ -204,7 +249,7 @@ export function resolveAppConfig(
     callbackPath,
     usersPath,
     sessionMode,
-    tokenKeys: deriveTokenKeys(options.appId, options.tokenKeyPrefix),
+    tokenKeys: mergeTokenKeys(options.appId, options.tokenKeyPrefix, options.tokenKeys),
     sessionProbeIntervalMs,
     whiteListPaths,
   }

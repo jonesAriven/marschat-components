@@ -107,6 +107,21 @@ export interface MarschatAppOptions extends AppOptionsInput {
   menus?: unknown[]
   /** 运行时配置；缺省自动读 `public/app-config.json`。 */
   runtime?: RuntimeConfig
+  /**
+   * 🔴 **权限查询基址**（`fetchPermissions` 用的 issuer），缺省等于 `issuer`。
+   *
+   * 存在的唯一理由：门户类应用（portal / cosmic-studio）的权限点由**自家后端 BFF 代理**
+   * 从 auth-center 取，浏览器**不能**直连 auth-center —— 直连会因缺 CORS/凭据 401，
+   * 而权限层是 fail-open 的：401 → `configured=false` → **权限体系静默全放行**
+   * （表现为「菜单全出来、按钮全可点」，且不报任何错）。
+   * 因此这类应用必须把 `permissionsIssuer` 指向同源代理（通常 `${apiBase}`）。
+   *
+   * ⚠️ **绝对不要**为了绕过本项而把 BFF 基址塞进 `issuer`：
+   * `issuer` 同时被 `ssoConfig.issuer` 消费（OIDC 发现 + 换票 + 会话探针），
+   * 改它会把 SSO 客户端指向自家代理 → **静默免登与 SLO 联动全部失效且不报错**。
+   * 两个字段必须分开：身份走中心（`issuer`），权限走代理（`permissionsIssuer`）。
+   */
+  permissionsIssuer?: string
   /** 当前站点 origin；缺省 `window.location.origin`。 */
   origin?: string
   /** 登录页外观（可选）。 */
@@ -117,8 +132,48 @@ export interface MarschatAppOptions extends AppOptionsInput {
   autoRoutes?: boolean
   /** 是否在挂载后预取权限点，默认 true。 */
   prefetchPermissions?: boolean
-  /** 是否在挂载后启动会话监视（SLO 联动），默认 true。 */
-  watchSession?: boolean
+  /**
+   * 🔴 **清理「令牌四键之外」的应用自管会话残留**（登出/ 401 / 会话丢失时调用）。
+   *
+   * 装配层的 `removeToken()` 只删令牌四键（access / refresh / kind / id），
+   * 组件库的 `clearLocalAuth()` 另删一个**硬编码**的 `auth_user`。
+   * 存量应用的自管键（如 portal 的 `portal_user` / `portal_role` / `portal_auth_uid`）
+   * **不在其中** ⇒ 登出后这些键**仍留在 localStorage**。
+   *
+   * 🔴 为什么这不只是「不干净」而是**安全问题**：`portal_role` 承载 `isAdmin` 判定。
+   * 登出未清 → 下一个打开该应用的人（共用浏览器 / 公共机）在**尚未登录**时，
+   * 若有代码读该键渲染管理员菜单，即为**权限信息泄漏**（前端 gate 被绕过）。
+   *
+   * 在此传入清理函数即可（幂等要求：**重复调用必须安全**，三条清理路径都会调它）：
+   * <pre>
+   * clearExtraAuth: () =&gt; {
+   *   localStorage.removeItem('portal_user')
+   *   localStorage.removeItem('portal_role')
+   *   localStorage.removeItem('portal_auth_uid')
+   * }
+   * </pre>
+   */
+  clearExtraAuth?: () => void
+  /**
+   * 是否在挂载后启动会话监视（SLO 联动），默认 true。
+   *
+   * 🔴 **只对「纯 OIDC 单模应用」保持默认不传。**
+   *
+   * 判据含 `sessionMode === 'oidc'`（`createMarschatApp.ts` 的bootstrap 闸门），
+   * 而 `sessionMode` 是**应用级常量** —— 它表达不了「同一应用内两种会话模式并存」的
+   * **双模应用**（账密 `legacy` + SSO `oidc` 并存，如 kb-web / portal）。
+   *
+   * 🔴 **双模应用传函数式判据**：`watchSession: () => isOidcToken()`。
+   * 组件库的 `getTokenKind()` 在**键缺失时回落 `'legacy'`**，故账密会话天然判false，
+   * 只有浏览器侧真走过 OIDC 授权跳转的会话才返回 true —— 这正是「该不该被监视」的判据。
+   * 若沿用布尔 `true`，监视器会去探 auth-center `/auth/session`（IdP 会话），
+   * 而账密会话在浏览器侧**根本没有 IdP 会话** → 探针恒 false →
+   * **3 秒后把在线用户误踢回 `?slo=1`**（2026-09-15kb-web / portal 实测事故，坑 #5 同源）。
+   *
+   * ⚠️ 反向坑：**纯 BFF 单模应用不要传函数**，让 `sessionMode` 闸门自然拦住；
+   * 传 `false` 也会平白丢掉SLO 联动。判据是「**是否纯 oidc**」，不是「是否用 BFF」。
+   */
+  watchSession?: boolean | (() => boolean)
   /** 挂载后跳转的目标（登录成功落地页）；缺省 `homePath`。 */
   afterLoginRedirect?: string
 }

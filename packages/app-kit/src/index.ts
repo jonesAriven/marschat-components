@@ -34,6 +34,7 @@ export {
   normalizeContextPath,
   baseFragment,
   deriveTokenKeys,
+  mergeTokenKeys,
   appUrl,
   toRouterPath,
   DEFAULTS,

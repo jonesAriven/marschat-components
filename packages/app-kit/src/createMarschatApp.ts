@@ -35,6 +35,7 @@ import {
   SsoCallbackView,
   UserManagementPanel,
   createUserAdminClient,
+  clearTokens,
   type SessionWatcher,
 } from '@marschat/auth-components'
 import { createRequest, createAuthGuard, type TokenStore } from '@marschat/frontend-common'
@@ -72,6 +73,30 @@ export function readRuntimeConfig(baseUrl = '/'): RuntimeConfig {
     /* 拉取/解析失败回落默认值 —— 本地开发无产物也能跑 */
   }
   return {}
+}
+
+/**
+ * 统一清理本地会话：**令牌四键 + 应用自管键**。
+ *
+ * 🔴 为什么必须收口到一处：清理发生在**三条独立路径**（401 分流 / 会话丢失 / 登出），
+ * 早期版本各写各的，漏一条就留下残留 —— 而 `portal_role` 这类键承载 `isAdmin` 判定，
+ * 登出后残留即为**权限信息泄漏**（共用浏览器场景）。集中实现避免「补了一条忘了另两条」。
+ *
+ * @param clearExtraAuth 应用自管键清理钩子（可选；须幂等 —— 本函数可能被重复调用）
+ */
+function clearLocalSession(clearExtraAuth?: () => void): void {
+  // 令牌四键（含 id_token）与组件库硬编码的 auth_user —— 保持与 auth-components 一致
+  clearTokens()
+  try {
+    localStorage.removeItem('auth_user')
+  } catch {
+    /* ignore：隐私模式 / 存储被禁用时不应连带阻断登出 */
+  }
+  try {
+    clearExtraAuth?.()
+  } catch {
+    /* ignore：应用钩子抛错不得让「已清令牌」的登出流程整体失败 */
+  }
 }
 
 /** 令牌存储适配：让 frontend-common 的请求实例复用 auth-components 的令牌读写（**单一真源**）。 */
@@ -129,14 +154,19 @@ export function createMarschatApp(options: MarschatAppOptions): MarschatApp {
     whiteListPaths: config.whiteListPaths,
     onUnauthorized: () => {
       // 非 OIDC 会话的 401：清本地并回登录页
-      removeToken()
+      clearLocalSession(options.clearExtraAuth)
       void options.router.replace(config.loginPath)
     },
   })
 
   // ⑤ 权限选项（三层同源：菜单 / 路由守卫 / PermissionGate 共用同一份状态）
+  //    🔴 issuer 走 `permissionsIssuer ?? config.issuer`：
+  //       门户类应用（portal / cosmic-studio）的权限查询必须走**自家后端 BFF 代理**（同源），
+  //       直连 auth-center 会 401 → fail-open → 权限体系静默全放行且不报错。
+  //       注意这里**只**改权限基址；上面 ③ 的 ssoConfig.issuer 仍指向中心，
+  //       否则 SSO 免登与 SLO 联动会静默失效。
   const permissions = {
-    issuer: config.issuer,
+    issuer: options.permissionsIssuer ?? config.issuer,
     clientId: config.clientId,
     getToken: () => getToken(),
     adminBypass: options.adminBypass ?? true,
@@ -230,15 +260,23 @@ export function createMarschatApp(options: MarschatAppOptions): MarschatApp {
       // 🔴 只有 OIDC 会话才启动会话监视：
       //    监视器探的是 auth-center `/auth/session`（IdP 会话）；BFF 换票模式（如 portal）
       //    浏览器侧根本没有 IdP 会话 → 探针恒 false → 3 秒后把在线用户误踢（Phase 11 实测事故）。
-      if (options.watchSession !== false
-        && config.sessionMode === 'oidc'
-        && getToken()) {
+      //
+      //    ⚠️ `sessionMode` 是**应用级常量**，表达不了「同一应用内两种会话并存」的**双模形态**
+      //    （账密 legacy + SSO oidc，如 kb-web / portal）。判据顺序（**0.1.3 行为逐字不变**）：
+      //      ① `watchSession` 传函数 → 取其返回值（**按会话实时**判据，仅双模应用需要）；
+      //      ② `watchSession` 传布尔 → 与 `sessionMode === 'oidc'` **仍取与**（保持 0.1.3 语义）；
+      //      ③ 都不传 → 仅看 `sessionMode === 'oidc'`。
+      //    ⚠️ 布尔 `true` **不能**越过 `sessionMode` 闸门（否则 BFF 应用传 true 就会被误踢）。
+      const useWatcher = typeof options.watchSession === 'function'
+        ? options.watchSession()
+        : (options.watchSession ?? true) && config.sessionMode === 'oidc'
+      if (useWatcher && getToken()) {
         watcher = sso.watchSession({
           intervalMs: config.sessionProbeIntervalMs,
           getToken: () => getToken(),
           clearLocalAuth: () => {
-            removeToken()
-            removeRefreshToken()
+            // 🔴 走统一清理：漏掉自管键会让 portal_role 之类残留（权限信息泄漏）
+            clearLocalSession(options.clearExtraAuth)
           },
           // 身份一致性守卫：共享浏览器换人登录时，本地旧 token 与 IdP 会话身份不符 → 静默重换票
           getLocalIdentity: () => decodeOidcClaims(getToken() || '').sub ?? null,
@@ -262,6 +300,8 @@ export function createMarschatApp(options: MarschatAppOptions): MarschatApp {
         homePath: config.homePath,
         onLogout: () => {
           watcher?.stop()
+          // 🔴 登出也必须清自管键：共用浏览器下残留的 portal_role 会被下一个人读到
+          clearLocalSession(options.clearExtraAuth)
           sso.logout()
         },
         ...overrides,
