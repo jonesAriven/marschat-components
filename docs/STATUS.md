@@ -12,7 +12,7 @@
 
 | 项 | 值 |
 |---|---|
-| 版本基线 | `@marschat/auth-components` **0.8.8**（⚠️ UMD 产物自报 0.8.7，见 T-LOW-3）｜ `@marschat/frontend-common` 0.3.5 ｜ `com.marschat:auth-core` **2.1.6** ｜ `com.marschat:common-core` 1.1.6 |
+| 版本基线 | `@marschat/app-kit` **0.1.2**（已发布 Nexus npm-hosted）｜ `@marschat/auth-components` **0.8.8**（⚠️ UMD 产物自报 0.8.7，见 T-LOW-3）｜ `@marschat/frontend-common` 0.3.5 ｜ `com.marschat:auth-core` **2.2.0**（已发布 Nexus maven-releases）｜ `com.marschat:common-core` 1.1.6 |
 | 六应用接入 | portal / activecode / kb-web / cosmic-studio / kb-ops / infra-monitor —— **登录页 · SSO · 统一鉴权 · 权限体系 · 用户统一管理 全部接入** |
 | 认证真源 | auth-center（`:8085`）唯一；账密真源归一**六应用全部完成**（kb-web 经 kb-gateway 直转中心；kb-ops 无账密入口） |
 | 权限模型 | 三层（Identity / Membership / Entitlement）已下沉到 API；strict 默认最小权限全站生效 |
@@ -37,6 +37,13 @@
 | # | 事项 | 工作量 / 依赖 |
 |---|---|---|
 | **T-ENG-1** | **应用台 Membership API path 化** | 状态（6 应用）仍走旧端点 `GET /admin/users?client=<id>`、`PUT /admin/users/{uid}/client-roles?client=<id>` —— `?client=` 是**查询参数，不是权限边界**。中心 path 化端点**已就绪**，应用侧需改：`packages/auth-components/src/utils/userAdmin.ts`（扩展 `createMemberAdminClient`）+ 6 个宿主页 baseUrl + **activecode 手写页 `members.html`**（无构建、手工改、易漏）。旧端点标 `@Deprecated` 但**保留作回滚路径**，两版可并存一个发版周期 |
+| **T-ENG-2** | ✅ **已闭合（2026-10-05）** 发布 `@marschat/app-kit` + `auth-core@2.2.0` 到 Nexus | 已发布并核验：`@marschat/app-kit` **0.1.2**（latest；0.1.0→0.1.1→0.1.2，后两版为迁移中发现的问题修复）· `com.marschat:auth-core` **2.2.0**（maven-releases，jar+pom+sources+校验和齐）。**后续组件改动需再发版** |
+| **T-ENG-3** | 🔴 **6 应用迁移到配置化接入**（消除 BFF 安全边界分叉） | **已完成 3 个**：kb-ops（`passthrough`）+ infra-monitor（`auto` 双会话）+ **activecode（后端；前端不适用 app-kit，见 T-ENG-3c）**。**剩余 3 个**：kb-web → cosmic-studio → portal（`portal` 额外传 `sessionMode: 'bff'`）。⚠️ 前端后端**必须同版本回滚**（kb-ops / infra 已迁前端；activecode 前端未迁故无此耦合） |
+| **T-ENG-3a** | ✅ **kb-ops 试点迁移完成（待发版部署）** | 删手写 `AdminProxyController`（266 行）+ 3 个前端适配层（263 行）；新增 `bff-whitelist.yml` + `src/marschat.ts` 一行装配。本地验证：前端类型错误 28→27（新增项已消除）· 前端构建 EXIT=0 · 后端编译/打包 EXIT=0 · jar 含 `auth-core-2.2.0` + `bff-whitelist.yml` · **白名单等价性 34/34 通过**。⏳ 待办：发版部署 + 真浏览器回归。**记录见 `kb-ops/docs/PHASE13-配置化接入迁移记录.md`** |
+| **T-ENG-3b** | ✅ **infra-monitor 迁移完成（待发版部署）** | 删手写后端 3 个类共 **461 行**（`AdminProxyController` 295 + `CenterSessionStore` 71 + `LocalAccountReporter` 95）→ 新增 `MarschatBffConfig`（约 50 行，两个扩展 Bean）+ `bff-whitelist.yml`（5 条）；删前端 3 个适配层 264 行。**首次验证 `credential-mode: auto`（双会话）与 `BffAccountSource` SPI**。本地验证：类型检查**不崩**、5 个错误全为存量（迁移零新增）· 前端构建 EXIT=0 · 后端编译/打包 EXIT=0 · jar 含 `auth-core-2.2.0` + `bff-whitelist.yml` · **白名单等价性 29/29 通过**（含「未登记面板端点必须拒绝」的差异点）。**记录见 `infra-monitor/docs/PHASE13-配置化接入迁移记录.md`** |
+| **T-ENG-3c** | ✅ **activecode 后端迁移完成（前端不可迁，见下）** | 删手写后端 3 个类共 **472 行**（`AdminProxyController` 297 + `CenterSessionStore` 71 + `LocalAccountReporter` 104）→ 新增 `MarschatBffConfig`（约 90 行）+ `bff-whitelist.yml`（5 条）。**本轮唯一「首次引入 auth-core」的应用**：需 `spring.autoconfigure.exclude` **4 条**（`AuthJwt` 会启动失败 / `AuthWeb` / `Authz` 重复拦截 / `MenuReport` 重复上报）+ **自定义 `BffCredentialResolver`**（本应用无 Spring Security，用户名在 HttpSession 而非 `getUserPrincipal()`）。本地验证：编译/打包 EXIT=0 · jar 含 `auth-core-2.2.0` + `bff-whitelist.yml` · **白名单等价性 29/29** · **自动装配覆盖率 6/6 有处置**。**记录见 `active-manager/docs/PHASE13-配置化接入迁移记录.md`** |
+| **T-ENG-4** | 🟡 **`menus.ts` 由 `menu-registry.yml` 生成** | 菜单目前双份手写（后端 yml 15 节点 ↔ 前端 `createKbMenus()` 15 节点），靠「严格对齐、禁止改名」的注释约束 = 靠人自觉。需定方向（建议 yml 为真源 → 生成 ts）后加生成步骤 + 门禁比对 |
+| **T-ENG-5** | 🟠 **无构建应用（UMD）的「配置化接入」路径不存在** | activecode 是纯静态页（无 `package.json`/打包器/`vue-router`）⇒ **`@marschat/app-kit` 完全不适用**。其前端接入面**仍是手写**：`sso.js` **418 行** + 6 个 HTML 各自处理会话 + `members.html` 手写用户管理。**不是实现缺陷，是路径缺失** —— 需新增 UMD 版装配层（`createMarschatUmdApp` + 页面级会话守卫 + 页面模板 + `UserManagementPanel` 的 UMD 出口）。建议 **Phase 14 评估**，优先级低于把 3 个已迁 SPA 铺开。⚠️ 另：UMD 产物自报 `version="0.8.7"` 与 `VENDORED.md` 的 0.8.8 戳不一致（`T-LOW-3` 仍未闭合） |
 
 ### 1.3 🟡 需协同执行（必须与另一动作同窗口）
 
@@ -60,7 +67,12 @@
 | **T-LOW-10** | kb-ops 平台级页签归属待定 | 「菜单授权」页签已加 `isPlatformAdmin` 守卫（保入口）；另一选项是整体迁至 portal 中心台 |
 | **T-LOW-11** | **用户管理页视觉 16 项待排期** | 元素级清单：操作列 5 个 link 按钮、色语义重叠、三套外壳主题、低对比度（未授权态约 2.3:1）、框中框等。清单见 `archive/portal-401/architect-fix-plan.md` §3.2 |
 | **T-LOW-12** | portal 共享槽修复（原"修复件②"）未做、且已降级 | `AuthCenterService.refreshTokens` = 进程内 `Map<Long,String>`、**键=userId 单槽、无锁** → 产 `invalid_grant`。但它是 **HTTP 200 + `code:401`（不硬踢）** ⇒ 已判定为硬踢症状的**红鲱鱼**，待 E0 的 `reason` 分布出来再定是否值得修 |
-| **T-LOW-13** | activecode 本地账号体系与中心收敛仍有差距 | 其本地仍存 `AdminUser` 表 + 自研 SHA-256 加盐 + 弱默认口令；后端**未引 auth-core**（前端 SSO 已用内联 UMD 组件）。与「账密真源归一」目标尚有距离 |
+| **T-LOW-13** | activecode 本地账号体系与中心收敛仍有差距 | 其本地仍存 `AdminUser` 表 + 自研 SHA-256 加盐 + 弱默认口令；后端**未引 auth-core**（前端 SSO 已用内联 UMD 组件）。与「账密真源归一」目标尚有距离。**注**：T-ENG-3 迁移时它会第一次引入 auth-core，可顺带收敛 |
+| **T-LOW-14** | **`SidebarMenu` 长期零引用**（Phase 13 审计发现） | `@marschat/frontend-common` 导出 `SidebarMenu` 但**全仓 0 引用**；各应用自写 `MainLayout.vue`（kb-web 675 / kb-ops 307 / infra 280 行）→ 三套外壳 → `T-LOW-11` 的 16 项视觉债。**已提供解法**：`@marschat/app-kit` 的 `createShell()`。待 T-ENG-3 迁移时一并切换 |
+| **T-LOW-15** | **`sso.ts` 兼容转发壳固化** | 各应用 `sso.ts` 16 个导出 / 126~168 行，多为「保持旧调用名不变」的转发别名（含 1 处 `@deprecated`）。属迁移期正确取舍但被固化。建议随 T-ENG-3 迁移时一并删除，勿再新增别名。**kb-ops 已删除**（其 `sso.ts`/`permissions.ts`/`token.ts` 三份共 263 行已移除） |
+| **T-LOW-16** | 🔴 **各应用需自查「`createRequest` 的 `hooks` 参数被静默忽略」** | `frontend-common@0.3.5` 的 `CreateRequestOptions` **无 `hooks` 字段**（已发布产物 `grep -c hooks dist/*.js` = **0**）。凡按 `createRequest({ hooks: { onError, onUnauthorized } })` 写的应用，**两个回调全部失效**，落到默认 `onUnauthorized = clearTokens() + location.href='/login'` → OIDC 静默续期分流成死代码。**kb-ops 已修**（迁移时发现）；**需逐应用 grep 自查**（`grep -rn "hooks:" --include=*.ts`） |
+| **T-LOW-17** | 🔴 **各应用需自查「SecurityConfig 显式 401 entry point」** | kb-ops 此前缺失 → 未携带 token 返 **403**、无效 token 返 **401**，同一语义两种状态码；前端 401 拦截器遇 403 不续期不跳登录 → 页面假死。README Level 4 检查清单 C 组已列为必检项，但**当时只写进文档没进门禁**。**kb-ops 已补**；infra-monitor **本就有**（2026-09-14 已修）→ 剩余 4 应用随 T-ENG-3 迁移时逐一体检 |
+| **T-LOW-18** | 🔴 **各前端 tsconfig 的 `@marschat/*` 源码别名会把组件库源码拉进类型检查，并可能让 `vue-tsc` 内部崩溃** | infra-monitor 实测 `Error: Debug Failure. No error for last overload signature`，**完全无法类型检查**。二分确认：**触发源在 `auth-components` 源码**（只加回该别名即崩）；但别名是**必要非充分**条件（portal 有同样别名却不崩）。修复 = **移除源码别名**，三个 `@marschat/*` 统一从 node_modules 解析（infra 已修，5 个错误全为存量）。**`devtools/portal/tsconfig.json` 同样有这两条别名，建议随其迁移一并移除**。⚠️ 另需排查：应用是否把 `typecheck` 接进 CI —— 目前 `build` 脚本普遍只有 `vite build`，**不做类型检查**，所以这类问题能长期潜伏 |
 
 ### 1.5 ⚪ 待观察（**不臆断为缺陷**）
 
@@ -90,6 +102,7 @@
 
 | 轮次 | 闭合项 |
 |---|---|
+| **Phase 13**（10-05/06） | 🆕 **接入架构审计**：实测各应用仍需手写 1100~2300 行接入胶水，定位 6 个架构缺口（BFF 三件套未公共化 / Shell 未收敛 / 菜单双份定义 / 兼容壳固化 / 无脚手架 / portal 不同构）｜✅ **`auth-core@2.2.0` 新增 BFF 自动装配**（白名单配置化 + 凭据三模式 + 账号上报 SPI），自测 **56 项全绿**｜✅ **`@marschat/app-kit` 装配层**（`createMarschatApp` / `createShell`），自测 **51 项 + 契约类型检查 + 构建全绿**；已发布 **0.1.2** 到 Nexus（`auth-core 2.2.0` 同批发布）｜✅ **接入脚手架** `scripts/scaffold-app.mjs`｜✅ **迁移 3 个应用**：kb-ops（**34/34**）+ infra-monitor（**29/29**，`auto` 双会话）+ activecode（后端 **29/29**，首次引入 auth-core）｜✅ 文档同步（README 第二篇 / CONFIG-REFERENCE §4.5 §5.1 / 本表 / `PHASE13-CONFIG-DRIVEN-ONBOARDING.md` / 各应用迁移记录）｜⏳ 待发版部署 + 真浏览器回归 + 剩余 3 个 SPA 应用 |
 | **R6**（09-18） | 🔴 **D2 高危**：portal / activecode 本地改密端点**真改本地影子口令**（中心不变 → 身份分裂）→ 已下线 **410 Gone** + 引导走中心（portal 下拉改「重置密码（走统一认证）」）｜🟡 D3：`auth.marschat.online/favicon.ico` 403/404 → 已放行 + 补图标｜🟢 认知订正：**kb-web 改密经 kb-gateway 代理到中心 = 正确范式**（已写入手册 §6.0） |
 | **R5**（09-17 晚） | **kb-ops 假闸门整改**：10 个 Controller 补 **25 个 api 写点** + `SyncController` 补闸门，`apis` 段 3 → **28**；实测「**开菜单 ≠ 给写权限**」（只授 menu 时 GET 200 / POST·DELETE 403）｜**E2E A~F 全通过**（SSO 免登 5/5、口令输入总次数 = 1、邮箱码频控、防枚举同文案、免登短路回归、activecode 匿名闸门 401）｜已认证端到端闭合 |
 | **R4**（09-17 下午） | BFF 重复 `client` 参数（HPP）加固 ×3｜kb-ops「菜单授权」页修复 + 页签守卫｜portal「有意不设 public 菜单」注释｜结案：portal 忘记密码（nginx 直连中心，线上 200 可用）、infra 忘记密码（可用，但耦合仍在 → T-LOW-8） |

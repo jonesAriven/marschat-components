@@ -1,0 +1,78 @@
+# =============================================================================
+# MarsChat 应用侧 BFF 白名单模板（Phase 13 配置化接入）
+# =============================================================================
+#
+# 用法：把本文件复制到**应用自己的** src/main/resources/bff-whitelist.yml，
+#       按本应用「用户管理」页实际调用的中心端点增删规则，然后配置：
+#
+#         marschat:
+#           bff:
+#             enabled: true
+#             client-id: marschat-<新应用>
+#
+# 语义（务必理解后再改）：
+#   * 本文件是**默认拒绝**清单 —— 未列出的路径一律 404，且不做任何中心调用。
+#   * 文件缺失 = 空白名单 = 管理面全部 404（安全侧可接受，功能侧表现为「点了就报错」）。
+#   * 每新增一个中心管理端点，应用侧必须**显式登记**，否则 404。
+#
+# 路径模式语法：
+#   {name}      匹配单个路径段（不跨 /）
+#   {clientId}  同 {name}，但**额外校验该段必须等于本应用 client-id**（防越界）
+#   *           段内任意字符
+#   **          任意多段
+#
+# 字段：
+#   path                  中心路径模式（必填）
+#   methods / method      允许的方法；缺省 = 任意方法。可写 [GET, PUT] 或 "GET,PUT"
+#   require-client-scope  校验 ?client= 必须等于本应用（缺省未传视为放行）；
+#                         出现 >1 个 client 键（参数劫持）一律拒绝
+#   client-in-path        校验路径中的 {clientId} 段必须等于本应用
+#
+# =============================================================================
+
+# 仅作自检与文档用途（真正的作用域绑定取 marschat.bff.client-id）
+client-id: marschat-CHANGE_ME
+
+rules:
+
+  # —— 中心侧 path 化端点：client 已钉进 path，天然限定本应用 ——
+  - path: /admin/clients/{clientId}/**
+    client-in-path: true
+
+  # —— 成员列表 / 全平台用户池（「添加已有用户」候选池）：只读，且 client 必须是本应用 ——
+  - path: /admin/users
+    methods: [GET]
+    require-client-scope: true
+
+  # —— 本系统角色绑定：读 + 写 ——
+  - path: /admin/users/{id}/client-roles
+    methods: [GET, PUT]
+    require-client-scope: true
+
+  # —— 用户级菜单减法（只能减不能加）：读 + 写 ——
+  - path: /admin/users/{id}/menu-overrides
+    methods: [GET, PUT]
+    require-client-scope: true
+
+  # —— 角色定义只读（渲染「本系统角色」勾选）——
+  - path: /admin/roles
+    methods: [GET]
+
+# —— 以下端点**默认不放行**，需要时由平台管理员确认后逐条打开 ——
+#
+#   - path: /admin/mappings
+#     methods: [GET, PUT]        # 账号映射（平台管理员专属）
+#   - path: /admin/permissions
+#     methods: [GET]             # 权限点树（平台管理员专属）
+#   - path: /admin/roles/{id}/permission-codes
+#     methods: [GET, PUT]        # 角色→权限点绑定（平台管理员专属）
+#
+# —— 以下端点**永不放行**（应用台已无相应入口；放行等于把平台级权限下发给应用管理员）——
+#
+#   POST   /admin/users                      新建身份
+#   PUT    /admin/users/{id}                 编辑身份
+#   DELETE /admin/users/{id}                 删除身份（墓碑）
+#   PUT    /admin/users/{id}/password        重置密码
+#   POST   /admin/clients/{cid}/roles        建应用角色
+#   *      /admin/authz/**                   授权策略运维
+#   *      /internal/**                       上报内网通道（带 secret）

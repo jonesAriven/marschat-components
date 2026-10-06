@@ -1,0 +1,52 @@
+{
+  "name": "@marschat/app-kit",
+  "version": "0.1.2",
+  "description": "MarsChat 应用接入装配层 —— 一行 createMarschatApp() 完成运行时配置/令牌/SSO/401续期/路由守卫/会话监视/权限预取/登录·回调·用户管理路由注册；新增应用只需引入本包 + 少量配置即可获得统一登录与用户管理",
+  "type": "module",
+  "main": "./dist/marschat-app-kit.es.js",
+  "module": "./dist/marschat-app-kit.es.js",
+  "types": "./dist/index.d.ts",
+  "files": [
+    "dist"
+  ],
+  "exports": {
+    ".": {
+      "import": "./dist/marschat-app-kit.es.js",
+      "require": "./dist/marschat-app-kit.umd.cjs",
+      "types": "./dist/index.d.ts"
+    }
+  },
+  "scripts": {
+    "dev": "vite",
+    "build": "vue-tsc --noEmit && vite build && vue-tsc -p tsconfig.build.json",
+    "build:es": "vite build",
+    "test": "node --experimental-strip-types --no-warnings test/run-tests.mjs && vue-tsc --noEmit -p tsconfig.test.json",
+    "test:config": "node --experimental-strip-types --no-warnings test/run-tests.mjs",
+    "test:types": "vue-tsc --noEmit -p tsconfig.test.json",
+    "preview": "vite preview"
+  },
+  "dependencies": {
+    "@marschat/auth-components": "^0.8.8",
+    "@marschat/frontend-common": "^0.3.5",
+    "vue": "^3.4.21"
+  },
+  "peerDependencies": {
+    "element-plus": "^2.6.1"
+  },
+  "devDependencies": {
+    "@vitejs/plugin-vue": "^5.0.4",
+    "typescript": "^5.4.2",
+    "vite": "^5.1.6",
+    "vue-tsc": "^2.0.6"
+  },
+  "keywords": [
+    "marschat",
+    "app-kit",
+    "bootstrap",
+    "sso",
+    "oidc",
+    "rbac"
+  ],
+  "author": "MarsChat DevTeam",
+  "license": "MIT"
+}

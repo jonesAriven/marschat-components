@@ -11,11 +11,15 @@
 
 | 文件 | 作用 | 是否手工编辑 |
 |---|---|---|
-| `devtools/apps-registry.yml` | **平台应用注册单一真源**（OIDC 客户端 + 前端运行时配置） | ✅ **唯一手工编辑点** |
+| `devtools/apps-registry.yml` | **平台应用注册单一真源**（OIDC 客户端 + 前端运行时配置） | ✅ **手工编辑点 ①** |
+| `<应用>/src/main/resources/menu-registry.yml` | 菜单与 api 权限点上报定义（classpath） | ✅ **手工编辑点 ②** |
+| `<应用>/src/main/resources/bff-whitelist.yml` | **管理代理白名单（Phase 13 新增）** —— 默认拒绝，未登记即 404 | ✅ **手工编辑点 ③** |
 | `auth-center/src/main/resources/clients.yml` | OIDC 客户端 L1 种子（供 `ClientsYmlLoader` 幂等写入 `sys_app_client`） | ❌ **AUTO-GENERATED，禁改** |
 | 各前端 `public/app-config.json` | 运行时配置（contextPath / apiBase / issuer / clientId） | ❌ **AUTO-GENERATED，禁改** |
-| `<应用>/src/main/resources/menu-registry.yml` | 菜单与 api 权限点上报定义（classpath） | ✅ 应用自己维护 |
 | `devtools/mykng/module-registry.yml` | 模块注册表（SSOT） | ✅ |
+
+> 📌 **「三处配置」原则**：接入一个新应用，手工编辑点只有上表前三行；
+> 其余接入面由 `@marschat/app-kit`（前端）与 `auth-core` 的 BFF 自动装配（后端）承担。
 
 ```bash
 # 改完 apps-registry.yml 必跑（产物 ① clients.yml ② 各前端 app-config.json）
@@ -102,6 +106,61 @@ apis:                          # ⚠️ api 点任何模式都不自动授予
 
 ---
 
+## 4.5 `bff-whitelist.yml`（管理代理白名单 · Phase 13 新增）
+
+> **定位**：应用侧「用户管理」页数据通道（`/admin/**` 代理）的访问控制清单。
+> 取代此前硬编码在各应用 `AdminProxyController.isAllowed()` 里的 30 行 Java 逻辑。
+> 完整模板见 auth-core jar 内 `META-INF/marschat/bff-whitelist.template.yml`。
+
+```yaml
+client-id: marschat-<应用>        # 仅作文档/自检；真正作用域取 marschat.bff.client-id
+rules:
+  - path: /admin/clients/{clientId}/**
+    client-in-path: true
+  - path: /admin/users
+    methods: [GET]
+    require-client-scope: true
+  - path: /admin/users/{id}/client-roles
+    methods: [GET, PUT]
+    require-client-scope: true
+  - path: /admin/roles
+    methods: [GET]
+```
+
+### 路径模式语法
+
+| 语法 | 含义 |
+|---|---|
+| `{name}` | 匹配单个路径段（不跨 `/`） |
+| `{clientId}` | 同 `{name}`，且**该段必须等于本应用 client-id**（防越界） |
+| `*` | 段内任意字符 |
+| `**` | 任意多段 |
+
+### 字段全表
+
+| 字段 | 必填 | 默认 | 语义 |
+|---|---|---|---|
+| `path` | ✅ | — | 中心路径模式 |
+| `methods` / `method` | — | 任意方法 | 允许的方法；支持 `[GET, PUT]` 或 `"GET,PUT"` |
+| `require-client-scope` | — | `false` | 校验 `?client=` 必须等于本应用；**出现 >1 个 `client` 键（参数污染 / HPP）一律拒绝** |
+| `client-in-path` | — | `false` | 校验路径中的 `{clientId}` 段必须等于本应用 |
+
+### 语义铁律
+
+1. **默认拒绝**：未命中任何规则 → `404`，且判定发生在**取凭据之前**（不泄漏、不转发、不调用中心）。
+2. **文件缺失 / YAML 语法错 = 空白名单 = 全部拒绝**（fail-closed），启动时打 WARN，**不阻断启动**。
+3. **取值来源**：`require-client-scope` 用 `request.getParameterValues("client")`（真实容器里已合并查询串与表单体），
+   **不是**只解析原始查询串 —— 否则「校验看查询串、转发带上表单体」可绕过作用域校验。
+4. **`/internal/**`（带 secret 的上报通道）与 `/auth/**` 永不放行**。
+5. 新增中心管理端点 → **应用侧必须显式登记**，否则 404（这是有意的摩擦）。
+
+### 默认**不放行**的端点（放行等于把平台级权限下发给应用管理员）
+
+`POST /admin/users`（建身份）· `PUT /admin/users/{id}`（改身份）· `DELETE /admin/users/{id}`（删身份）·
+`PUT /admin/users/{id}/password`（重置口令）· `POST /admin/clients/{cid}/roles`（建应用角色）· `/admin/authz/**`（授权策略运维）
+
+---
+
 ## 5. 环境变量清单
 
 | 变量 | 侧 | 作用 | 注意 |
@@ -114,6 +173,43 @@ apis:                          # ⚠️ api 点任何模式都不自动授予
 | `MARSCHAT_AUTH_SECRET` | kb-ops | 上项在 kb-ops 的等价变量 | 与上项**同值**（即 F1 的第三处） |
 | `INFRA_ADMIN_PASS` | infra-monitor | 管理口令（已外置） | — |
 | `MENU_REPORT_SECRET` | cosmic-studio compose | 映射自 `COSMIC_MENU_REPORT_SECRET` | — |
+
+### 5.1 `marschat.bff.*`（管理代理配置 · Phase 13 新增）
+
+> 由 `MarschatBffAutoConfig` 绑定到 `BffProperties`。**`enabled` 默认 `false`，不打开则完全不装配**（对既有应用零影响）。
+
+| 属性 | 默认 | 语义 |
+|---|---|---|
+| `marschat.bff.enabled` | `false` | 是否启用管理代理；显式打开才装配 |
+| `marschat.bff.client-id` | — | 本应用 client_id（**必填**；未配置时白名单判定一律拒绝） |
+| `marschat.bff.auth-center-base` | `http://127.0.0.1:8085` | 中心内网基址（compose 网络可写 `http://auth-center:8085`） |
+| `marschat.bff.path-prefix` | `/api/admin` | 本应用对前端暴露的代理前缀（kb-ops 风格用 `/admin`） |
+| `marschat.bff.center-path-prefix` | `/admin` | 中心侧管理端点前缀，一般不改 |
+| `marschat.bff.credential-mode` | `passthrough` | 凭据解析模式，见下 |
+| `marschat.bff.whitelist-location` | `classpath:bff-whitelist.yml` | 白名单文件位置 |
+| `marschat.bff.connect-timeout-ms` | `5000` | 连接中心超时 |
+| `marschat.bff.request-timeout-ms` | `10000` | 单次代理超时 |
+| `marschat.bff.report-secret` | — | 账号上报凭据（`X-Client-Secret`），建议 `${MARSCHAT_MENU_REPORT_SECRET:}` |
+| `marschat.bff.account-report-enabled` | `true` | 本地账号上报开关（无 `BffAccountSource` Bean 时自动跳过） |
+
+**`credential-mode` 三态**（把三份手写实现的历史行为差异收敛为配置）：
+
+| 值 | 行为 | 历史对应 |
+|---|---|---|
+| `passthrough` | 直接透传调用者 `Authorization` 头 | kb-ops |
+| `session-store` | 按当前用户名从 `CenterSessionStore` 取中心令牌 | 更严格的账密形态 |
+| `auto` | 非自签 token 直接用；自签 token 回落会话表（需提供 `BffLocalTokenClassifier` Bean，否则退化为 `passthrough`） | infra-monitor / activecode |
+
+> **安全不变式（三模式共同保证）**：绝不使用服务账号兜底；解析不到凭据 → `401` fail-closed；角色判定不在代理层做（中心返 403/401 原样透传）。
+
+**可选扩展 Bean**（应用提供即生效，不提供则用默认实现）：
+
+| Bean | 作用 |
+|---|---|
+| `CenterSessionStore` | 覆盖默认的进程内实现（如换 Redis，解决重启即失效 / 多副本不共享） |
+| `BffCredentialResolver` | 完全自定义凭据解析（如换票时顺带刷新） |
+| `BffLocalTokenClassifier` | 供 `auto` 模式判断「token 是否本应用自签」 |
+| `BffAccountSource` | 提供本地账号清单（提供后自动装配上报器，取代各应用 95~111 行重复实现） |
 
 > 🔴 铁律：**任何文档 / 仓库不得出现明文 secret**。一律写"见 Vaultwarden 或 infrastructure-map 技能"。
 

@@ -9,6 +9,11 @@
       - SSO Phase 1：统一 jjwt HS256 验签 + LoginUser 解析 + Feign token 透传
       - SSO Phase 2 (2.0.0)：新增 OIDC RS256 双验签（JWKS 拉取 + TTL 缓存 + kty=RSA 收取）
         TokenProvider.validateToken 先 RS256 后回退 HS256，平滑过渡期两种 token 并存
+      - Phase 13 (2.2.0)：新增 BFF 管理代理自动装配（com.marschat.auth.bff）
+        · 白名单配置化：bff-whitelist.yml（默认拒绝 + HPP 加固），取代各应用 30 行硬编码 isAllowed()
+        · 凭据模式可配：passthrough / session-store / auto，收敛三份行为已分叉的手写实现
+        · 本地账号上报：BffAccountSource SPI，取代三份 95~111 行重复实现
+        · 默认 enabled=false，对既有应用零影响
       - 前身为各服务各自复制的 JwtTokenProvider / JwtUtil / FeignConfig
       - 下游引入后自动装配 TokenProvider，无需再手写 JWT 工具类
       - Gitee: git@gitee.com:jonesAriven/auth-core.git
@@ -22,9 +27,9 @@
 
     <groupId>com.marschat</groupId>
     <artifactId>auth-core</artifactId>
-    <version>2.1.6</version>
+    <version>2.2.0</version>
     <name>auth-core</name>
-    <description>认证公共库（独立 jar）：jjwt HS256 验签 + OIDC RS256 双验签 / LoginUser 解析 / Feign token 透传 —— SSO Phase 2 落地件</description>
+    <description>认证公共库（独立 jar）：jjwt HS256 验签 + OIDC RS256 双验签 / LoginUser 解析 / Feign token 透传 / BFF 管理代理（白名单配置化 + 凭据模式可配 + 本地账号上报）—— SSO Phase 2 + Phase 13 配置化接入</description>
 
     <scm>
         <connection>scm:git:git@gitee.com:jonesAriven/auth-core.git</connection>

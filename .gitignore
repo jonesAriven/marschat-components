@@ -53,6 +53,8 @@ temp/
 *.bak
 *.swp
 *~
+# pnpm 在本机偶发落下的 0 字节占位文件（_tmp_<pid>_<hash>），实测已出现两次
+_tmp_*
 
 # vite 构建临时文件
 *.timestamp-*.mjs

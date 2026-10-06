@@ -5,8 +5,8 @@
 > **文档分工**：本文 = **现行态**（怎么设计 / 怎么接入 / 怎么运维）｜ `docs/STATUS.md` = **进行中**（未决项与待办）｜ `docs/TROUBLESHOOTING.md` = **故障排查**｜ `devtools/docs/adr/*` = **决策史**（当初为何这样定、走过哪些弯路）。
 > ⚠️ **冲突裁定**：同一事实若本文与 ADR 不一致，**以反映最新线上实测的一方为准，并当场回写本文**——不要两处各说各话（历史教训：手册与 ADR 长期漂移，如用户真源表名 `user` vs `sys_user`、F1 密钥共享处数、Phase 11 待办状态）。
 >
-> **版本基线（2026-09-18 实测态；配置项与环境变量全表见 `docs/CONFIG-REFERENCE.md`）**
-> `@marschat/auth-components` **0.8.8**（0.8.8 = app 作用域身份只读，D-3 收口；已发布 Nexus npm-hosted）｜ `@marschat/frontend-common` 0.3.5 ｜ `com.marschat:auth-core` **2.1.6** ｜ `com.marschat:common-core` 1.1.6
+> **版本基线（2026-10-05 实测态；配置项与环境变量全表见 `docs/CONFIG-REFERENCE.md`）**
+> `@marschat/app-kit` **0.1.2**（装配层，Phase 13 新增；已发布 Nexus npm-hosted）｜ `@marschat/auth-components` **0.8.8**（0.8.8 = app 作用域身份只读，D-3 收口；已发布 Nexus npm-hosted）｜ `@marschat/frontend-common` 0.3.5 ｜ `com.marschat:auth-core` **2.2.0**（2.2.0 = BFF 管理代理自动装配，Phase 13 新增；已发布 Nexus maven-releases）｜ `com.marschat:common-core` 1.1.6
 > 6 应用（portal / activecode / kb-web / **cosmic-studio**（client-id，历史文档简写 cosmic）/ kb-ops / infra-monitor）的**登录页、SSO、统一鉴权、权限体系**全部接入。
 >
 > **📚 文档地图**（本目录）
@@ -16,6 +16,7 @@
 > | `README.md`（本文） | 权威手册：设计 / 接入 / 使用运维 | **现行态**，随代码更新 |
 > | `STATUS.md` | **未决项与待办**：优先级清单 + 待拍板 + 已知取舍 + 下一轮路线 | 现行态，**接手先读** |
 > | `CONFIG-REFERENCE.md` | 配置项 / 环境变量 / 端点 / 已注册 client / 数据库真源 全表 | 现行态，随 registry 更新 |
+> | `PHASE13-CONFIG-DRIVEN-ONBOARDING.md` | **配置化接入（三处配置 + 一行装配）**：审计 → 设计 → 实现 → 自测 → 迁移路线 | 现行态（2026-10-05） |
 > | `TROUBLESHOOTING.md` | 排查手册：症状 → 定位 → 根因 + 取证命令集 | 现行态 |
 > | `VERIFY-REPORT-2026-09-17.md` | Phase 12 全量验证报告（102 用例 / 0 真实失败） | 快照（2026-09-17） |
 > | `PHASE12-ROUND6-2026-09-18.md` | R6 多轮浏览器回归与缺陷修复证据 | 快照（2026-09-18） |
@@ -53,13 +54,14 @@ auth-center（:8085，唯一身份与授权真源）
   └─ 账号映射 app_account_mapping（本地账号 ↔ 中心身份，自动认领）
 ```
 
-## 2. 组件全景（4 包，2 生态）
+## 2. 组件全景（5 包，2 生态）
 
 | 包 | 生态 | 干什么 | 谁消费 |
 |---|---|---|---|
+| **`@marschat/app-kit`** | npm | **装配层（Phase 13 新增）**：`createMarschatApp()` 一行完成运行时配置/令牌/SSO/401续期/守卫/会话监视/权限预取/路由注册；`createShell()` 共享外壳 | **所有前端（推荐入口）** |
 | `@marschat/auth-components` | npm | 认证 UI（LoginPage/LoginPanel/SsoCallbackView/用户管理面板×4/PermissionGate）+ SSO client（PKCE/静默免登/静默续期/会话监视）+ token 存储 + usePermissions/useMenus | 所有前端 |
 | `@marschat/frontend-common` | npm | createRequest（401 静默续期拦截器）、createAuthGuard 路由守卫、TokenStore、SidebarMenu | 所有前端 |
-| `com.marschat:auth-core` | Maven | TokenProvider(HS256)、OidcTokenVerifier(RS256/JWKS)、@MarsUser、@RequirePermission、MenuRegistryReporter、Feign 透传 | 所有 Java 后端 |
+| `com.marschat:auth-core` | Maven | TokenProvider(HS256)、OidcTokenVerifier(RS256/JWKS)、@MarsUser、@RequirePermission、MenuRegistryReporter、Feign 透传、**BFF 管理代理（Phase 13 新增：白名单配置化 + 凭据模式可配 + 账号上报 SPI）** | 所有 Java 后端 |
 | `com.marschat:common-core` | Maven | Result/异常体系/MyBatis-Plus 自动配置/链路 trace | 所有 Java 后端 |
 
 - 源：Nexus `nexus.marschat.online`（npm-*/maven-releases）；仓库：Gitee `jonesAriven/marschat-components`（monorepo）
@@ -227,8 +229,94 @@ auth-center（:8085，唯一身份与授权真源）
 # 第二篇 接入
 
 > 目标：新应用从零接入**统一登录 + 统一鉴权 + 权限体系**，全程**不改 auth-center Java**。
-> 标准参考实现（薄适配层四件套 + 后端三件套）：`devtools/infra-monitor/infra-monitor-{web,server}`。
-> 机器可读配置真源：`devtools/apps-registry.yml` + 各应用 `menu-registry.yml`；**字段语义、环境变量、端点全表见 `docs/CONFIG-REFERENCE.md`**。
+> 机器可读配置真源：`devtools/apps-registry.yml` + 各应用 `menu-registry.yml` + 各应用 `bff-whitelist.yml`；**字段语义、环境变量、端点全表见 `docs/CONFIG-REFERENCE.md`**。
+> 演进记录与审计依据见 `docs/PHASE13-CONFIG-DRIVEN-ONBOARDING.md`。
+
+## 🆕 配置化接入（Phase 13 起 · 推荐路径）
+
+> **一句话**：引入 `@marschat/app-kit`（前端）+ `com.marschat:auth-core`（后端），写**三份配置 + 一行装配**，
+> 即得统一登录（SSO / 账密 / 邮箱码 / 忘记密码）、统一鉴权（RBAC 三层同源）、单点登出联动、以及「本系统用户」管理页。
+>
+> **背景**：Phase 13 审计实测，此前每个应用仍需手写 **1100 ~ 2300 行**接入胶水，且 60% 以上是同构复制粘贴，
+> 已产生过真实漂移缺陷（`permissions.ts` 双前缀、三份 BFF 凭据策略分叉）。本路径把这部分**下沉到公共包**。
+
+### 三份配置
+
+| # | 文件 | 位置 | 作用 |
+|---|---|---|---|
+| 1 | `apps-registry.yml` 条目 | `devtools/` | OIDC client + 前端运行时配置真源（已有） |
+| 2 | `menu-registry.yml` | 应用后端 classpath | 菜单 + api 权限点上报（已有） |
+| 3 | **`bff-whitelist.yml`** | 应用后端 classpath | **管理代理白名单（新增）** —— 默认拒绝，未登记即 404 |
+
+### 一行装配（前端）
+
+```ts
+// src/marschat.ts
+import { createMarschatApp } from '@marschat/app-kit'
+export const marschat = createMarschatApp({
+  appId: 'marschat-<新应用>',   // = apps-registry 的 client-id
+  router,
+  menus,                        // ← 唯一必须手写的业务数据
+})
+```
+```ts
+// src/main.ts
+const app = createApp(App)
+app.use(createPinia())
+marschat.install(app)      // 内部按正确顺序挂 router（守卫已先注册）
+app.use(ElementPlus)
+app.mount('#app')
+marschat.bootstrap()       // 会话监视 + 权限预取
+```
+```vue
+<!-- src/App.vue —— 共享外壳（侧边栏 + 顶栏 + 内容区），消除各应用自写 MainLayout -->
+<script setup lang="ts">
+import { marschat } from './marschat'
+const Shell = marschat.createShell()
+</script>
+<template><component :is="Shell" /></template>
+```
+
+自动完成（**不再需要应用侧写**）：运行时配置读取（含 `//` 横幅剥离）· `window.__MARSCHAT_APP_BASE__` 声明 ·
+令牌键绑定 · SSO 客户端 · 统一请求 + 401 分流 · 路由守卫（`app.use(router)` 之前注册）·
+`/login` `/sso-callback` `/users` 路由注册 · 会话监视（仅 OIDC 会话）· 权限预取。
+
+### 一行装配（后端）
+
+```yaml
+marschat:
+  oidc:
+    issuer: https://auth.marschat.online
+    jwks-uri: http://auth-center:8085/oauth2/jwks
+  menu:
+    report: { enabled: true, client-id: marschat-<新应用>, issuer: http://auth-center:8085 }
+  bff:                                    # ← 新增：打开即装配管理代理
+    enabled: true
+    client-id: marschat-<新应用>
+    auth-center-base: http://auth-center:8085
+    path-prefix: /api/admin
+    credential-mode: passthrough           # passthrough | session-store | auto
+```
+
+自动装配（`MarschatBffAutoConfig`）：白名单校验（默认拒绝 + HPP 加固）· 凭据解析（三模式）·
+fail-closed 401 · 状态码与响应体透传 · 本地账号上报（提供 `BffAccountSource` Bean 时）。
+**不配置 `enabled` = 不装配**，对既有应用零影响。
+
+### 脚手架
+
+```bash
+node scripts/scaffold-app.mjs --app-id marschat-demo --context-path /demo --out ./tmp/demo
+```
+生成前端 4 文件（`marschat.ts` / `main.ts` / `menus.ts` / `App.vue`）+ 后端 2 文件（`bff-whitelist.yml` / 配置片段）+ 接入清单。
+
+### 迁移口径（存量 6 应用）
+
+1. 前端：按上面替换 `main.ts` 装配；用 `tokenKeyPrefix` 传旧前缀（如 `'kb_'`）保住老用户登录态。
+2. 后端：把硬编码白名单改写成 `bff-whitelist.yml`，删除自家的 `AdminProxyController` / `CenterSessionStore` / `LocalAccountReporter`，打开 `marschat.bff.enabled`。
+3. `portal` 额外传 `sessionMode: 'bff'`（消除其账密换票的特例分支）。
+4. 灰度：`enabled` 默认 false，逐个应用切换；回滚即设回 false。
+
+---
 
 ## Level 0：注册进平台（约 10 分钟）
 
@@ -257,6 +345,10 @@ cd devtools && python scripts/gen-from-registry.py
 容器注入 `MARSCHAT_MENU_REPORT_SECRET`（与 registry 同值）。**同时**在 `menu-registry.yml` 给落地页标 `public: true`（否则 strict 下普通用户登录一片空白，坑 #17）。
 
 ## Level 1：最小接入（SSO + API 带票）
+
+> ⚠️ **以下为「手工装配」路径**（Phase 13 前的标准做法），适用于：
+> ① 存量应用尚未迁移；② 有特殊装配需求（自定义登录页交互、非 Vue 前端）。
+> **新增应用请优先用上面的「配置化接入」** —— 同样的效果，但不用手写这 7 个文件。
 
 ### 前端四件套（Vue3 SPA）
 
