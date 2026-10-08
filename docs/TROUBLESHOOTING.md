@@ -191,6 +191,42 @@
 |---|---|
 | **机制** | 用户名删除后有**墓碑**（不可复建，防冒用，坑 #20）→ 回归脚本请用**常驻低权账号**（如 `p10x`），不要用一次性账号名 |
 
+### 4.5 🔴 应用级（client 级）角色**不会自动补齐** —— 「新建管理员卡在第③道闸」的真因
+
+> 2026-10-09 实测定位。与 §4.3（应用管理员**权限点**自动补齐）是**两件事**，别混为一谈。
+
+**症状**：应用里明明把某人设成了管理员，他调管理面却被第③道闸（中心权限点 `api:admin`）挡在门外；查中心 `sys_permission` 权限点**存在**、也被角色持有 —— 就是这个人没有。
+
+**根因（不对称）**：中心 `DatabaseInitializer.seedRbacBase()` **只补平台级**：
+
+| 层级 | 自动补齐 | 依据 | 落库 |
+|---|---|---|---|
+| **platform 级**（`scope='platform'`） | ✅ 有 | `user.role` 字段 | `sys_user_role(client_id=NULL)` |
+| **应用级**（`client_id='marschat-portal'`） | ❌ **完全没有** | —— | 只能人工授予或应用侧申请 |
+
+而应用闸门要的偏偏是**应用级**权限点 ⇒ **平台级有兜底、应用级裸奔**。
+
+**附带事实（2026-10-09 实测，可直接引用）**：
+- 中心**活跃用户仅 3 个**：1 × `superadmin`（`admin`/id 1）+ 2 × `user`；**`role='admin'` 活跃用户 = 0** ⇒ 「给 admin 补授权」当前**无对象可补**（`inserted_rows=0`）。
+- `marschat-portal` 客户端下全部角色绑定只有 3 条，其中 2 条的用户已 `deleted=1` ⇒ **实际生效的只有 user 1 一条**。
+- 应用本地 `role=admin` 的账号，在 `app_account_mapping` 里常是 **`user_id=NULL`（从未认领到中心身份）** ⇒ 它们在中心**根本不存在**，补任何授权都是空操作。
+
+**定位命令**：
+```sql
+-- ① 有没有 admin 可补（常为空集，先跑这条，别空忙）
+SELECT id,username,role FROM user WHERE deleted=0 AND role='admin';
+-- ② 某客户端下到底有几条生效的授权
+SELECT ur.user_id,u.username,u.deleted,ur.role_id,r.code
+FROM sys_user_role ur LEFT JOIN user u ON u.id=ur.user_id LEFT JOIN sys_role r ON r.id=ur.role_id
+WHERE ur.client_id='marschat-portal';
+-- ③ 本地账号有没有被认领（user_id=NULL ⇒ 中心无身份，补了也白补）
+SELECT local_account,user_id,status FROM app_account_mapping WHERE client_id='marschat-portal';
+```
+
+**处置**：不要在「已删除 / 未认领」的账号上补授权（制造垃圾数据 + 墓碑不可复建）。要么**补机制**（应用级自动补齐，需动 auth-center 枢纽），要么**应用侧放宽**（把平台 admin 也纳入放行）。两条路都是设计决策，**须拍板后执行**，见 `STATUS.md` T-ENG-7。
+
+**⚠️ 排查纪律**：看到「某人缺权限点」，**先跑①确认有没有活的 admin**，再看是「没授权」还是「这个人压根不在中心」。本次就是在跑完①之后才发现整件事的前提（「有 admin 需要补」）**不成立**。
+
 ---
 
 ## 5. 取证命令集（复制即用）
