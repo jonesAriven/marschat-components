@@ -2,7 +2,7 @@
 
 > **定位**：统一认证平台的**配置真源、字段语义、环境变量、端点、数据库表、域名端口**全表。接入新应用或排查配置时先查本文，不要去 ADR / 快照里翻。
 > **配套**：`README.md`（设计 · 接入 · 使用运维）· `STATUS.md`（未决项与待办）· `TROUBLESHOOTING.md`（故障排查）。
-> **时效**：截至 **2026-09-19**。apps-registry 与 client 表以 `devtools/apps-registry.yml` 为准，改动后请同步本表。
+> **时效**：截至 **2026-10-07**（新增 §5.2 app-kit 装配层字段全表）
 > 🔴 **本表不含任何口令 / secret 明文** —— 只写**字段与取值方式**，值一律见 Vaultwarden（`vault.marschat.online:8222`）或部署机 env。
 
 ---
@@ -212,6 +212,40 @@ rules:
 | `BffAccountSource` | 提供本地账号清单（提供后自动装配上报器，取代各应用 95~111 行重复实现） |
 
 > 🔴 铁律：**任何文档 / 仓库不得出现明文 secret**。一律写"见 Vaultwarden 或 infrastructure-map 技能"。
+
+---
+
+### 5.2 `@marschat/app-kit` 装配层字段（前端 · Phase 13 · 0.1.3~0.1.4）
+
+> 这些**不是环境变量**，而是传给 `createMarschatApp()` 的声明式选项，集中在各应用的
+> `src/config/runtime.ts`（或 `config.js`）。**唯一需要手写的接入代码就是这一段声明。**
+> 签名真源：`packages/app-kit/src/config.ts` 与 `src/types.ts`。
+
+| 字段 | 类型 | 默认 | 语义与踩坑 |
+|---|---|---|---|
+| `appId` | `string` | **必填** | = `apps-registry.yml` 的 `client-id`；缺失即抛错 |
+| `contextPath` | `string` | `'/'` | 部署子路径。`normalizeContextPath` 归一（`kb`→`/kb`、`/kb/`→`/kb`） |
+| `apiBase` | `string` | `` `${base}/api` `` | 业务 API 基址 |
+| `authApiBase` | `string` | `` `${apiBase}/auth` `` | ⚠️ **同名不同义的坑**：这是**应用后端**的认证基址；登录页组件自己的 `authApiBase` 可能指向 **nginx 层的忘记密码通道**（如 portal 的 `/portal/auth-api` → kb-gateway）。**两者不可"统一"** |
+| `homePath` | `string` | `'/dashboard'` | 🔴 **必须显式传**。守卫 `onDeny` 消费它（`router.replace(config.homePath)`）；类型是 `string` **非字面量联合** ⇒ 公共包改默认值时 `vue-tsc` **零报错**，缺省会静默跳到路由表里不存在的路径（404 空页）。判据：**该应用路由表里到底有没有那个路由**（kb-web/kb-ops 有；cosmic/portal **没有** ⇒ 必须传 `'/'`） |
+| `tokenKeyPrefix` | `string` | 由 `appId` 派生 | 前缀派生四件套（`kb_` ⇒ `kb_access_token` 等）。⚠️ 派生值不等于历史键时**登录态会消失** |
+| 🔴 `tokenKeys` | `Partial<TokenKeys>` | — | **0.1.3 新增**。**逐字段 `??` 覆盖**前缀派生值，用于非标准键名（portal的 `portal_token`、cosmic 的 `token`）。⚠️ 实现用 `??` 不是 `||`（空串不应回落派生值）；**漏传的键保留派生值**，不会变 `undefined` |
+| 🔴 `permissionsIssuer` | `string` | `config.issuer` | **0.1.3 新增**。权限查询走**自家 BFF 代理**（同源）而非直连中心。⚠️ **不要**图省事把它设成 `issuer` —— `issuer` 同时被 SSO 客户端消费，改了会让静默免登与 SLO 全部失效。**不设的后果**：直连中心 401 ⇒ `configured=false` ⇒ **权限静默全放行** |
+| `sessionMode` | `'oidc' \| 'bff'` | `'oidc'` | 应用级会话形态常量 |
+| 🔴 `watchSession` | `boolean \| (() => boolean)` | `true` | **0.1.4 起支持函数**。**双模应用**（账密 `legacy` + SSO `oidc` 并存）传`() => isOidcToken()` 才是正解 —— 判据从「应用启动时快照」变成「每次求值」。⚠️ 布尔 `true` **越不过** `sessionMode` 闸门（BFF 应用传 true 会被3 秒误踢，2026-09-15 事故）。⚠️ portal 这类「HS256 自签 + 自管监视器四项」形态**不适用**函数式，仍需自管 |
+| 🔴 `clearExtraAuth` | `() => void` | — | **0.1.4 新增**。清理应用**自管键**（portal 的 `portal_user`/`portal_role`/`portal_auth_uid`）。接入**全部三条清理路径**（401 / 会话丢失 / 登出）⇒ **必须幂等**。⚠️ 不写的后果：`portal_role` 残留 ⇒ **未认证即可见管理员入口**（权限信息泄漏） |
+| `autoRoutes` | `boolean` | `true` | 是否自动注册 `/login` `/sso-callback` `/users`；沿用既有路由表时传 `false` |
+| `usersPath` | `string \| false` | `'/users'` | 传 `false` 关闭自动路由 |
+| `userManagement` | `object` | — | 透传 `UserManagementConfig`（`scopeMode` / `baseUrl` / `roles` / `allowResetPassword` 等） |
+
+**双模应用（账密 + SSO 并存）三条必传**：
+```ts
+watchSession: () => isOidcToken(),   // 或 false + 应用层手工分流
+tokenKeys:    { accessTokenKey: '<本应用真实键>' },
+homePath:     '<本应用路由表里真实存在的路径>',
+```
+
+**0.1.4 兼容性**：`watchSession` 的布尔路径与 0.1.3 **逐格一致**（6/6 差分验证）⇒ 已迁应用升级零行为变化；不传新字段时 `tokenKeys` / `permissionsIssuer` / `clearExtraAuth` 均不生效。
 
 ---
 

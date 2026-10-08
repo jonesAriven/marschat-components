@@ -5,8 +5,8 @@
 > **文档分工**：本文 = **现行态**（怎么设计 / 怎么接入 / 怎么运维）｜ `docs/STATUS.md` = **进行中**（未决项与待办）｜ `docs/TROUBLESHOOTING.md` = **故障排查**｜ `devtools/docs/adr/*` = **决策史**（当初为何这样定、走过哪些弯路）。
 > ⚠️ **冲突裁定**：同一事实若本文与 ADR 不一致，**以反映最新线上实测的一方为准，并当场回写本文**——不要两处各说各话（历史教训：手册与 ADR 长期漂移，如用户真源表名 `user` vs `sys_user`、F1 密钥共享处数、Phase 11 待办状态）。
 >
-> **版本基线（2026-10-05 实测态；配置项与环境变量全表见 `docs/CONFIG-REFERENCE.md`）**
-> `@marschat/app-kit` **0.1.2**（装配层，Phase 13 新增；已发布 Nexus npm-hosted）｜ `@marschat/auth-components` **0.8.8**（0.8.8 = app 作用域身份只读，D-3 收口；已发布 Nexus npm-hosted）｜ `@marschat/frontend-common` 0.3.5 ｜ `com.marschat:auth-core` **2.2.0**（2.2.0 = BFF 管理代理自动装配，Phase 13 新增；已发布 Nexus maven-releases）｜ `com.marschat:common-core` 1.1.6
+> **版本基线（2026-10-07 实测态；配置项与环境变量全表见 `docs/CONFIG-REFERENCE.md`）**
+> `@marschat/app-kit` **0.1.4**（装配层，Phase 13 新增；已发布 Nexus npm-hosted）｜ `@marschat/auth-components` **0.8.8**（0.8.8 = app 作用域身份只读，D-3 收口；已发布 Nexus npm-hosted）｜ `@marschat/frontend-common` 0.3.5 ｜ `com.marschat:auth-core` **2.2.0**（2.2.0 = BFF 管理代理自动装配，Phase 13 新增；已发布 Nexus maven-releases）｜ `com.marschat:common-core` 1.1.6
 > 6 应用（portal / activecode / kb-web / **cosmic-studio**（client-id，历史文档简写 cosmic）/ kb-ops / infra-monitor）的**登录页、SSO、统一鉴权、权限体系**全部接入。
 >
 > **📚 文档地图**（本目录）
@@ -240,6 +240,16 @@ auth-center（:8085，唯一身份与授权真源）
 > **背景**：Phase 13 审计实测，此前每个应用仍需手写 **1100 ~ 2300 行**接入胶水，且 60% 以上是同构复制粘贴，
 > 已产生过真实漂移缺陷（`permissions.ts` 双前缀、三份 BFF 凭据策略分叉）。本路径把这部分**下沉到公共包**。
 
+> **接入成本（2026-10-07 六应用实测）**
+>
+> | | 迁移前 | 现在 |
+> |---|---|---|
+> | 前端 | **1100~2300 行**手写接入胶水（60%+ 是复制粘贴） | **30~66 行**声明式装配（`marschat.ts`） |
+> | 后端 | **472~1106 行**手写 Controller | **0 行 Java** + 一份 YAML（`bff-whitelist.yml` 45~202 行） |
+>
+> 已迁 5 个：kb-ops · infra-monitor · kb-web · cosmic-studio · portal（三者本轮合计**净删 573 行**）。
+> 剩 activecode（无构建 UMD 静态页，**app-kit 不适用**，见 `STATUS.md` T-ENG-5）。
+
 ### 三份配置
 
 | # | 文件 | 位置 | 作用 |
@@ -257,6 +267,14 @@ export const marschat = createMarschatApp({
   appId: 'marschat-<新应用>',   // = apps-registry 的 client-id
   router,
   menus,                        // ← 唯一必须手写的业务数据
+
+  // 🔴 下面四项是最容易漏、漏了「不报错但功能坏」的配置（详见 CONFIG-REFERENCE §5.2）
+  homePath: '/',                // 必须显式：类型是 string 非字面量联合，
+                                 // 公共包改默认值时 vue-tsc 零报错 → 静默跳 404 空页
+  watchSession: () => isOidcToken(),  // 双模应用（账密+SSO 并存）必须用函数式判据
+  tokenKeys: { accessTokenKey: '<本应用真实键>' },  // 键名非 <prefix>access_token 形态时必填
+  permissionsIssuer: '/<ctx>/api',     // 权限走自家 BFF 代理；不设 → 直连中心 401 →
+                                       // configured=false → 权限静默全放行
 })
 ```
 ```ts
@@ -312,9 +330,10 @@ node scripts/scaffold-app.mjs --app-id marschat-demo --context-path /demo --out 
 ### 迁移口径（存量 6 应用）
 
 1. 前端：按上面替换 `main.ts` 装配；用 `tokenKeyPrefix` 传旧前缀（如 `'kb_'`）保住老用户登录态。
-2. 后端：把硬编码白名单改写成 `bff-whitelist.yml`，删除自家的 `AdminProxyController` / `CenterSessionStore` / `LocalAccountReporter`，打开 `marschat.bff.enabled`。
+2. 后端：把硬编码白名单改写成 `bff-whitelist.yml`，删除自家的 `AdminProxyController` / `CenterSessionStore` / `LocalAccountReporter`，打开 `marschat.bff.enabled`（**顺序铁律**：必须先删旧代理再开 `enabled`，两者都映射 `/api/admin/**` ⇒ `Ambiguous mapping` 启动崩溃）。
 3. `portal` 额外传 `sessionMode: 'bff'`（消除其账密换票的特例分支）。
 4. 灰度：`enabled` 默认 false，逐个应用切换；回滚即设回 false。
+5. **双模应用**（账密 + SSO 并存，如 kb-web / cosmic / portal）必须传 `watchSession: () => isOidcToken()`；布尔 `true` 越不过 `sessionMode` 闸门，会复现 2026-09-15「3 秒被误踢」事故。
 
 ---
 

@@ -2,7 +2,7 @@
 
 > **定位**：本文是「应用接入架构」的**决策与落地记录**（背景 → 审计 → 设计 → 实现 → 自测 → 迁移）。
 > **配套**：`README.md` 第二篇（怎么接入）· `CONFIG-REFERENCE.md` §4.5/§5.1（配置字段全表）· `STATUS.md`（待办 `T-ENG-2`/`T-ENG-3`）。
-> **时效**：2026-10-05。**本表不含任何口令 / secret 明文**。
+> **时效**：2026-10-07（§5 迁移路线已收官：5/6 应用上线）。**本文不含任何口令 / secret 明文**。
 
 ---
 
@@ -88,7 +88,7 @@
 改为取 `request.getParameterValues("client")`（真实容器里已合并查询串与表单体），
 并补 3 条单测锁定。**这是本次自测最有价值的产出之一。**
 
-### 3.2 前端：`@marschat/app-kit@0.1.0`
+### 3.2 前端：`@marschat/app-kit`（首发 0.1.0，**当前 0.1.4**）
 
 | 模块 | 职责 |
 |---|---|
@@ -158,7 +158,7 @@ node scripts/scaffold-app.mjs --app-id marschat-demo --context-path /demo --out 
 | 包 | 版本 | 仓库 | 核验 |
 |---|---|---|---|
 | `com.marschat:auth-core` | **2.2.0** | maven-releases（`192.168.31.105:8081`） | jar + pom + sources + md5/sha1 共 9 个资产 |
-| `@marschat/app-kit` | **0.1.2**（latest） | npm-hosted（`nexus.marschat.online`） | 0.1.0 → 0.1.1 → 0.1.2，后两版为**迁移过程中发现的问题修复** |
+| `@marschat/app-kit` | **0.1.4**（latest） | npm-hosted（`nexus.marschat.online`） | 0.1.0 → 0.1.1 → 0.1.2 → **0.1.3**（`tokenKeys` / `permissionsIssuer`）→ **0.1.4**（函数式 `watchSession` / `clearExtraAuth`），后四版均为**迁移过程中发现的问题修复** |
 
 > 0.1.1：`MarschatApp.sso/request/permissions` 从 `unknown` 改为精确类型（迁移方不必强转）。
 > 0.1.2：`RouterLike` 方法签名放宽 —— 手写的精确结构类型会让 vue-router 的 `Router`
@@ -200,8 +200,8 @@ node scripts/scaffold-app.mjs --app-id marschat-demo --context-path /demo --out 
 | 2 | 试点 **kb-ops**（纯 SSO、`credential-mode: passthrough`） | ✅ 代码+本地验证完成（白名单 **34/34**） |
 | 3 | 第 2 个 **infra-monitor**（双会话、`credential-mode: auto`、host 网络） | ✅ 代码+本地验证完成（白名单 **29/29**） |
 | 4 | 第 3 个 **activecode**（无 Security、首次引入 auth-core、无构建前端） | ✅ **后端**完成（白名单 **29/29**）；❌ **前端不可迁**（见下） |
-| 5 | 逐个迁移：**kb-web** → **cosmic-studio** → **portal** | ⏳ 未开始 |
-| 6 | `portal` 最后迁移，额外传 `sessionMode: 'bff'` | ⏳ 涉及 BFF 换票 + 会话监视特例，风险最高 |
+| 5 | 逐个迁移：**kb-web** → **cosmic-studio** | ✅ **已完成并上线**（kb-web −258 行 / cosmic −54 行；流水线 #838 / #121） |
+| 6 | `portal` 最后迁移 | ✅ **已完成并上线**（前端 −261 行 + 后端三道闸；流水线 #839 / #840；**注：原计划的 `sessionMode: 'bff'` 经核实是错的** —— portal 是**双模**（账密 + SSO 并存），传 `'bff'` 会让真SSO 会话也失去 SLO 联动；正确做法是默认 `'oidc'` + `watchSession: () => isOidcToken()`） |
 | 7 | 迁移完成的应删除自家 `AdminProxyController` / `CenterSessionStore` / `LocalAccountReporter` 与 `sso.ts` 兼容壳（`T-LOW-15`） | kb-ops / infra-monitor / activecode 已完成删除 |
 
 ### 🔴 边界发现：无构建应用（UMD）**没有**配置化接入路径（`T-ENG-5`）
@@ -273,7 +273,9 @@ activecode 是**纯静态页**（无 `package.json` / 打包器 / `vue-router`�
 
 | # | 事项 | 归属 |
 |---|---|---|
-| T-ENG-2 | 发布 `app-kit@0.1.0` + `auth-core@2.2.0` | `STATUS.md` §1.2 |
+| T-ENG-2 | 发布 `app-kit` + `auth-core@2.2.0` | ✅ **已闭合**（app-kit 累计发到 **0.1.4**，auth-core 2.2.0） |
+| **T-ENG-7** | 🆕 **portal 存量 admin 账号授权普查** | 本轮恢复中心权限点校验后，普通 `role=admin` 账号会401（中心的 `sys_permission` 表无 `api:admin` 权限点）。**迁移前是放行的** ⇒ 需普查存量 admin 并补授权。见 `STATUS.md` §1.2 |
+| **T-ENG-8** | 🆕 **portal 账密凭据链修复** | ✅ 已修并真机验证（账密 admin 访问管理面 200）。⚠️ 遗留：`clearUserCredentials()` 暂无调用方（`/auth/logout` 是空实现），**该端点恢复真实语义时必须接上**，否则登出后服务端残留可用凭据 |
 | T-ENG-3 | 6 应用迁移（消除 BFF 安全边界分叉） | `STATUS.md` §1.2 |
 | T-ENG-4 | `menus.ts` 由 `menu-registry.yml` 生成（消灭双份定义） | `STATUS.md` §1.2 |
 | T-LOW-14 | `SidebarMenu` 死代码 → 已提供 `createShell()` 解法，待迁移切换 | `STATUS.md` §1.4 |
