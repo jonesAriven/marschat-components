@@ -204,6 +204,11 @@ node scripts/scaffold-app.mjs --app-id marschat-demo --context-path /demo --out 
 | 6 | `portal` 最后迁移 | ✅ **已完成并上线**（前端 −261 行 + 后端三道闸；流水线 #839 / #840；**注：原计划的 `sessionMode: 'bff'` 经核实是错的** —— portal 是**双模**（账密 + SSO 并存），传 `'bff'` 会让真SSO 会话也失去 SLO 联动；正确做法是默认 `'oidc'` + `watchSession: () => isOidcToken()`） |
 | 7 | 迁移完成的应删除自家 `AdminProxyController` / `CenterSessionStore` / `LocalAccountReporter` 与 `sso.ts` 兼容壳（`T-LOW-15`） | kb-ops / infra-monitor / activecode 已完成删除 |
 
+> **逐应用迁移记录**（含实测增删行数、参数陷阱、验证证据）：
+> `kb-ops/docs/PHASE13-配置化接入迁移记录.md` · `infra-monitor/docs/…` · `active-manager/docs/…` ·
+> `mykng/kb-web/docs/…` · `cosmic-studio/docs/…` · `portal/docs/…`（命名统一为 `PHASE13-配置化接入迁移记录.md`）。
+> kb-web / cosmic-studio / portal 三份于 2026-10-08 补齐，与前三个试点同格式。
+
 ### 🔴 边界发现：无构建应用（UMD）**没有**配置化接入路径（`T-ENG-5`）
 
 activecode 是**纯静态页**（无 `package.json` / 打包器 / `vue-router`），因此：
