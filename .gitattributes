@@ -1,0 +1,29 @@
+# 统一行尾符策略（2026-10-08 补）
+#
+# 背景：本仓 `core.autocrlf=true`，但入库时 git **不会**做转换（autoCRLF 只影响工作区↔索引的
+# checkout 方向）。Phase 13 文档批量更新时用 Python 写入了 LF 版本，提交后把原 CRLF 文件整体翻转，
+# 产生 651 增/632 删 的假 diff（实际内容只改 22 行）。
+#
+# 策略：**入库统一 LF**（跨平台最稳、diff 最小），工作区由 core.autocrlf 按平台自行转换。
+#
+# ⚠️ 实测说明（2026-10-08）：`git add --renormalize .` **不会**重写历史文件的行尾符
+#（git 只对「本次新增/修改」的行应用规则，已入库的 CRLF 不追溯）。
+# ⇒ 本文件约束的是**后续提交**：今后任何文件入库都是 LF，不会再出现「整文件翻转」假 diff。
+#    历史文件若要统一，需 `git rm --cached` 后重新 add，本仓暂不做（改动面大、收益仅是历史整洁）。
+
+* text=auto eol=lf
+
+# 二进制：禁止任何行尾转换与 diff
+*.png   binary
+*.jpg   binary
+*.jpeg  binary
+*.gif   binary
+*.ico   binary
+*.pdf   binary
+*.zip   binary
+*.gz    binary
+*.jar   binary
+*.woff  binary
+*.woff2 binary
+*.ttf   binary
+*.eot   binary
