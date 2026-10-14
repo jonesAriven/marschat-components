@@ -13,6 +13,7 @@
 
 | 包名 | 版本 | 说明 |
 |------|------|------|
+| `@marschat/app-kit` | `0.1.4` | **装配层**：`createMarschatApp()` 一行完成运行时配置/令牌/SSO/401续期/守卫/会话监视/权限预取/路由注册；`createShell()` 共享外壳（Phase 13 新增） |
 | `@marschat/auth-components` | `0.8.8` | 认证 UI（LoginPage/LoginPanel/SsoCallbackView）+ SSO client（PKCE/静默免登/续期）+ 用户管理面板×4（platform\|app 双作用域）+ PermissionGate + usePermissions/useMenus |
 | `@marschat/frontend-common` | `0.3.5` | createRequest（401 静默续期拦截器）、createAuthGuard 路由守卫、TokenStore、SidebarMenu |
 
@@ -21,9 +22,9 @@
 | 包名 | 版本 | 说明 |
 |------|------|------|
 | `common-core` | `1.1.6` | 公共核心库（Result、异常处理、链路追踪、MyBatis-Plus 配置、事件总线） |
-| `auth-core` | `2.1.6` | 认证公共库（HS256 TokenProvider、RS256/JWKS OidcTokenVerifier、@MarsUser、@RequirePermission、菜单上报、Feign 透传） |
+| `auth-core` | `2.2.0` | 认证公共库（HS256 TokenProvider、RS256/JWKS OidcTokenVerifier、@MarsUser、@RequirePermission、菜单上报、Feign 透传、**BFF 管理代理自动装配：白名单配置化 + 凭据三模式 + 账号上报 SPI**） |
 
-> 版本基线 **2026-09-18**（Phase 12 收口后线上实测态）。升级前请核对 `docs/README.md` 的版本基线行与 `docs/CONFIG-REFERENCE.md` 的配置全表。
+> 版本基线 **2026-10-07**（Phase 13 配置化接入收官后实测态：5/6 应用已迁移上线）。升级前请核对 `docs/README.md` 的版本基线行与 `docs/CONFIG-REFERENCE.md` 的配置全表。
 
 ## 🚀 快速开始
 
@@ -60,6 +61,7 @@ pnpm build:all
 ```
 marschat-components/
 ├── packages/                    # 前端 npm 包
+│   ├── app-kit/                 #   装配层（0.1.4）：createMarschatApp 一行接入 + createShell 共享外壳
 │   ├── auth-components/         #   认证 UI + SSO client（0.8.8）
 │   │   ├── src/
 │   │   │   ├── components/      #     LoginPage / LoginPanel / SsoCallbackView
@@ -76,8 +78,9 @@ marschat-components/
 │       └── src/                 #     request(401 静默续期) / createAuthGuard / TokenStore / SidebarMenu
 ├── java/                        # Java Maven 包
 │   ├── common-core/             #   1.1.6：Result / 异常体系 / 链路 trace / MyBatis-Plus / 事件总线
-│   └── auth-core/               #   2.1.6：TokenProvider(HS256) / OidcTokenVerifier(RS256·JWKS)
+│   └── auth-core/               #   2.2.0：TokenProvider(HS256) / OidcTokenVerifier(RS256·JWKS)
 │                                #          @MarsUser / @RequirePermission / MenuRegistryReporter / Feign 透传
+│                                #          BFF 管理代理（白名单配置化 + 凭据三模式 + 账号上报 SPI）
 ├── scripts/                     # 构建脚本
 ├── docs/README.md               # 🔥 唯一权威手册
 ├── pnpm-workspace.yaml
@@ -89,8 +92,8 @@ marschat-components/
 ### 在前端项目中使用
 
 ```bash
-# 添加依赖
-pnpm add @marschat/auth-components @marschat/frontend-common
+# 添加依赖（新应用推荐直接用装配层 app-kit）
+pnpm add @marschat/app-kit @marschat/auth-components @marschat/frontend-common
 ```
 
 ```typescript
@@ -122,7 +125,7 @@ const { request, authRequest } = createRequest({
 <dependency>
     <groupId>com.marschat</groupId>
     <artifactId>auth-core</artifactId>
-    <version>2.1.6</version>
+    <version>2.2.0</version>
 </dependency>
 ```
 
@@ -197,6 +200,7 @@ pnpm publish
 | 文档 | 内容 |
 |------|------|
 | **[docs/README.md](./docs/README.md)** | 🔥 **权威手册（从这里开始）**：设计篇 / 接入篇（Level 0–5，含无构建静态页）/ 使用运维篇 + 39 条踩坑铁律 |
+| **[docs/PHASE13-CONFIG-DRIVEN-ONBOARDING.md](./docs/PHASE13-CONFIG-DRIVEN-ONBOARDING.md)** | **配置化接入（Phase 13 决策记录）**：架构审计 → 设计（三处配置 + 一行装配）→ 实现 → 自测 → 6 应用迁移路线 |
 | **[docs/STATUS.md](./docs/STATUS.md)** | ⏳ **未决项与待办**（唯一权威）：优先级清单 + 待拍板 + 已知取舍 + 下一轮路线 —— **接手先读** |
 | **[docs/CONFIG-REFERENCE.md](./docs/CONFIG-REFERENCE.md)** | 配置项 / 环境变量 / 端点 / 已注册 client / 数据库真源 全表 |
 | [docs/TROUBLESHOOTING.md](./docs/TROUBLESHOOTING.md) | 排查手册：症状 → 定位 → 根因 + 取证命令集 |
@@ -211,7 +215,7 @@ pnpm publish
 | [packages/auth-components/FORGOT-PASSWORD-USAGE.md](./packages/auth-components/FORGOT-PASSWORD-USAGE.md) | 忘记密码四步状态机 |
 | [packages/frontend-common/README.md](./packages/frontend-common/README.md) | createRequest / createAuthGuard / TokenStore |
 | [java/auth-core/README.md](./java/auth-core/README.md) | 后端验签与权限注解 |
-| `devtools/docs/adr/` | 架构决策记录（决策史），最新为 `ADR-2026-09-16-Phase12-统一认证权限治理.md`；索引见同目录 `INDEX.md` |
+| `devtools/docs/adr/` | 架构决策记录（决策史），最新为 `ADR-2026-09-16-Phase12-统一认证权限治理.md`；索引见同目录 `INDEX.md`。⚠️ **Phase 13 配置化接入的决策记录不在该目录**，见 `docs/PHASE13-CONFIG-DRIVEN-ONBOARDING.md` |
 
 > ⚠️ 早期曾存在 `docs/INTEGRATION-GUIDE.md`、`docs/SSO-IMPLEMENTATION-SUMMARY.md`、`docs/ADR-SSO-Cookie-Domain-Sharing.md`、`docs/AUTH-CENTER-COOKIE-GUIDE.md`、`docs/APP-UPGRADE-GUIDE.md` 等 7 份文档，**已全部合并进 `docs/README.md` 并从仓库删除**，旧链接会 404，勿再引用（沿革见 docs/README.md 文末附录）。
 

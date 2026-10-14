@@ -331,7 +331,7 @@ node scripts/scaffold-app.mjs --app-id marschat-demo --context-path /demo --out 
 
 1. 前端：按上面替换 `main.ts` 装配；用 `tokenKeyPrefix` 传旧前缀（如 `'kb_'`）保住老用户登录态。
 2. 后端：把硬编码白名单改写成 `bff-whitelist.yml`，删除自家的 `AdminProxyController` / `CenterSessionStore` / `LocalAccountReporter`，打开 `marschat.bff.enabled`（**顺序铁律**：必须先删旧代理再开 `enabled`，两者都映射 `/api/admin/**` ⇒ `Ambiguous mapping` 启动崩溃）。
-3. `portal` 额外传 `sessionMode: 'bff'`（消除其账密换票的特例分支）。
+3. `portal` **不要**传 `sessionMode: 'bff'` —— 迁移时实测该做法是错的：portal 是**双模**（账密 + SSO 并存），传 `'bff'` 会让真 SSO 会话也失去 SLO 联动。正解 = 默认 `'oidc'` + `watchSession: () => isOidcToken()`（详见 `PHASE13-CONFIG-DRIVEN-ONBOARDING.md` §5 步 6）。
 4. 灰度：`enabled` 默认 false，逐个应用切换；回滚即设回 false。
 5. **双模应用**（账密 + SSO 并存，如 kb-web / cosmic / portal）必须传 `watchSession: () => isOidcToken()`；布尔 `true` 越不过 `sessionMode` 闸门，会复现 2026-09-15「3 秒被误踢」事故。
 
@@ -518,7 +518,7 @@ apis:                       # ⚠️ api 点任何模式都不自动授予，写
    - `POST /api/auth/mail-login` → 中心 `/auth/mail-login`（**响应体 HS384 + data.user，直接采信身份**，坑 #16）
    - `POST /api/auth/forgot-password` / `reset-password` → 中心同名端点（透传校验结果）
    - `POST /api/auth/sso-login`（body 用 **`username` + `access_token`**，snake_case！）→ OIDC RS256 验签 → 收敛链
-3. ⚠️ 坑 #19：SAS 令牌 `sub`=**用户 ID**（用户名在独立 `username` 声明）——映射主体取 `username` 声明，勿用 sub（activecode 现状以 sub 为键，靠超管例外兜底，待修 F2）。
+3. ⚠️ 坑 #19：SAS 令牌 `sub`=**用户 ID**（用户名在独立 `username` 声明）——映射主体取 `username` 声明，勿用 sub（✅ activecode 已于 **2026-09-15 修复**：sso-login 改取 `username` 声明，见遗留表 F2；前端取用同序同名 `username → preferred_username → sub`）。
 
 ## 踩坑铁律速查（#1-#15 沿革自 Phase 9，#16-#20 为 Phase 10 新增，全部实战血泪）
 
@@ -614,8 +614,9 @@ apis:                       # ⚠️ api 点任何模式都不自动授予，写
 
 ```bash
 cd marschat-components
-pnpm build        # 前端两包（vue-tsc+vite）   pnpm build:java   # 后端两包 mvn deploy → Nexus
-pnpm publish --filter @marschat/auth-components   #（+ frontend-common；Nexus 代理组缓存加 --prefer-online）
+pnpm build        # 前端三包（vue-tsc+vite）   pnpm build:java   # 后端两包 mvn deploy → Nexus
+pnpm publish --filter @marschat/app-kit            # 装配层（Phase 13 起新应用接入入口）
+pnpm publish --filter @marschat/auth-components    #（+ frontend-common；Nexus 代理组缓存加 --prefer-online）
 ```
 应用侧升级按坑 #13 三对齐，再走各应用 Woodpecker 流水线。UMD 同步目前为**人工步骤**（构建舱无 npm）——建议加 CI 门禁比对 VENDORED sha256（ADR §37.7）。
 
