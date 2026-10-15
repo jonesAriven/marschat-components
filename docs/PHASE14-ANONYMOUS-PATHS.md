@@ -106,13 +106,17 @@ Spring MVC 拦截器与 Spring Security `requestMatchers` 均按 **context-path 
 | 应用 | 匿名放行项（无票实测） | 受护端点（无票实测） |
 |---|---|---|
 | activecode（.182:18080） | `POST /activecode/api/activation/verify` → **200**「激活码不能为空」（到达路由）· `GET /activecode/api/activation/config/default-expire` → **200** 配置 · `POST /activecode/api/activation/generate`（方法级）→ **200**「序列号不能为空」（到达路由） | `GET /activecode/api/activation/list` → **401**「未登录或会话已过期」 |
-| portal（.105:8087） | `GET /portal/actuator/health` → **200** UP · `GET /portal/api/auth/sso/authorize?...` → **400**（参数校验，到达路由）· `POST /portal/api/auth/sso/exchange` → 到达路由（`state` 为空时 500，见下） | `GET /portal/api/sys/system/list` → **401**「未登录或登录已过期」 |
+| portal（.105:8087） | `GET /portal/actuator/health` → **200** UP · `GET /portal/api/auth/sso/authorize?...` → **400**（参数校验，到达路由）· `POST /portal/api/auth/sso/exchange`（无 state）→ **业务 400**「SSO 状态无效或已过期，请重新登录」（到达路由，修复前为 500 NPE，见下） | `GET /portal/api/sys/system/list` → **401**「未登录或登录已过期」 |
 | kb-ops（.105:8084） | `GET /kb-ops/actuator/health` → **200** UP（db/redis/ping 全 UP） | `GET /kb-ops/api/host/list` → **401**「未登录或登录已过期」 |
 | infra-monitor（.105:8088 host 网络，SSH 侧实测） | `GET /infra/actuator/health` → **200** UP · `GET /infra/auth/login` → **405**「请求方法不支持: GET」（POST-only，到达路由）· `POST /infra/auth/mail-login/send-code` 空 body → **200**「缺少邮箱」（到达路由） | `GET /infra/auth/permissions` → **401**（🔴 故意不在清单，安全边界保持） |
 | cosmic-studio（.105:8310） | 见 §6 表（health 200 / login 422） | `GET /api/projects` → **401** `{"detail":"未登录"}` |
 
 **顺带发现并修复（portal 既有缺陷，非本轮引入）**：`POST /portal/api/auth/sso/exchange` 不带 `state` 时，
-`AuthCenterService.consumeState(null)` 直接 `ConcurrentHashMap.remove(null)` 抛 NPE → 500（日志 traceId 可证）。
+`AuthCenterService.consumeState(null)` 直接 `ConcurrentHashMap.remove(null)` 抛 NPE → 500（日志 traceId `b0b21f83…` 可证）。
 真实 SSO 流程 state 必带，故此前未暴露。已修：`consumeState` 入参判空（null/blank → 返回 null），
 落入 controller 既有的 `origin == null` 分支 → 业务 400「SSO 状态无效或已过期，请重新登录」。
 全仓 grep 确认 `consumeState` 仅 portal 一处，无同类项。
+
+**修复上线与复验**：devtools commit `179fdf8e`（3 行判空）→ Woodpecker **#852** ✅（177s，portal-server 容器重建上线）→
+复验 `curl -X POST /portal/api/auth/sso/exchange -d '{"code":"dummy"}'`（无 state）→ HTTP 200 信封 + **body code 400**
+「SSO 状态无效或已过期，请重新登录」（traceId `81c6f9d5…`），500 NPE 消除 ✅。
