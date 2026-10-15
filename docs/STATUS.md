@@ -85,6 +85,8 @@
 | **T-LOW-18** | 🔴 **各前端 tsconfig 的 `@marschat/*` 源码别名会把组件库源码拉进类型检查，并可能让 `vue-tsc` 内部崩溃** | infra-monitor 实测 `Error: Debug Failure. No error for last overload signature`，**完全无法类型检查**。二分确认：**触发源在 `auth-components` 源码**（只加回该别名即崩）；但别名是**必要非充分**条件（portal 有同样别名却不崩）。修复 = **移除源码别名**，三个 `@marschat/*` 统一从 node_modules 解析（infra 已修，5 个错误全为存量）。**`devtools/portal/tsconfig.json` 同样有这两条别名，建议随其迁移一并移除**。⚠️ 另需排查：应用是否把 `typecheck` 接进 CI —— 目前 `build` 脚本普遍只有 `vite build`，**不做类型检查**，所以这类问题能长期潜伏 |
 | **T-LOW-19** | **activecode 匿名 generate 缺频控 / 验证码** | Phase 14 放行配置化后，`POST /activecode/api/activation/generate`（方法级匿名放行）无票可达路由 —— **无频控、无验证码** ⇒ 存在被批量刷激活码的风险。需评估补频控或人机验证（Phase 14 已提出，待回应） |
 | **T-LOW-20** | **cosmic 中间件只认 `Authorization: Bearer` 一种带票形态** | cosmic-studio `AnonymousAuthMiddleware` 目前仅识别 `Authorization: Bearer <token>`；带票 200 已在端到端断言覆盖。其他带票形态（如 query 参数）不支持 —— 确认无业务需要后关闭，或在文档显式说明 |
+| **T-LOW-21** | **删用户不清 `oauth2_authorization`（QA P2-2）** | 删除中心用户时 `oauth2_authorization` 授权记录**残留**（09-18 实测 19/12 行）⇒ 旧授权记录在有效期内仍可能被命中（理论风险，未实证被拒）。建议补级联删除或定期清理任务。证据：`archive/portal-401/qa-multisession-report.md` P2-2 |
+| **T-LOW-22** | **legacy 账密会话无 IdP 会话可联动（QA P1-1 · 设计使然）** | `sessionWatcher` 按 `isOidcToken()` 门控**仅对 SSO 会话**启动（Phase 13 装配层 `sessionMode:'bff'` + `watchSession:false` 为**有意保留**该语义，见 `devtools/docs/PHASE13-剩余三应用迁移设计.md` §1.5/§3.4）⇒ legacy 账密登录用户的单点登出联动与身份守卫**天然无效**。**非缺陷**（watcher 监视的是 IdP 会话，legacy 会话不存在 IdP 会话可监视）；QA 09-18 实测 5+3 应用复现该现象后长期无文档记载，今补登定性、销账。若未来要覆盖 legacy 会话需另设计（如本地心跳对时）。证据：`archive/portal-401/qa-multisession-report.md` P1-1 / `qa-coverage-report.md` |
 
 ### 1.5 ⚪ 待观察（**不臆断为缺陷**）
 
@@ -93,7 +95,8 @@
 | **T-OBS-1** | kb-web 一次 `[api] 请求失败`、infra 一次 401 console 报错 | 专项复跑 **3 轮 0 命中** → 登记待观察；再次出现需带完整请求上下文与时间点上报 |
 | **T-OBS-2** | 邮箱验证码**闭环**未验 | 已验证「发送 + 60s 频控 + 错误文案」；真收码闭环需真实邮箱，未执行 |
 | **T-OBS-3** | portal S3/S4「身份守卫链路」缺陷（链路 B） | 与硬踢 401 **是两条不同链路**（已独立登记）：现象为停在 `/portal/auth/callback?code=…`、`POST .../sso/exchange` **未被发出**、**全程 0 个 `/portal/api/**` 401**。待 D-1/D-2 落地后单独复验 |
-| **T-OBS-4** | E0 后验基线尚未采集 | E0 结构化采样日志**已上线并实测落点正确**；但三条 headless 自验按**冻结令**暂缓（制造真 401 会在生产日志留痕、污染后验基线）。解冻后统一跑，用于定格 `reason` 分布 —— 这是闭合 portal 401 归因的**唯一剩余手段** |
+| **T-OBS-4** | E0 后验基线尚未采集（**优先级随归因闭合已下降**） | E0 结构化采样日志**已上线并实测落点正确**；三条 headless 自验按**冻结令**暂缓（制造真 401 会在生产日志留痕）。⚠️ **2026-10-08 归因已由 T-ENG-9 闭合**（hutool `JWTSigner` 非线程安全，已修 #843）⇒ 本条**不再是「闭合 portal 401 归因的唯一剩余手段」**，降级为可选的后验数据采集，解冻后跑即可 |
+| **T-OBS-5** | 同浏览器双 tab **静默切换身份**（QA P2-1 · 已知边界） | IdP 会话 Cookie 为域级单例：同浏览器第二个账号登录会覆盖第一个，已开页签 ≤60s **静默切换身份**（无提示、无 401）。属会话模型固有约束（S8b 跨应用版同因：kb-web/kb-ops 同 origin 但 localStorage 键名零交集，互不覆盖）。登记为已知边界；如需消除须改会话隔离策略（影响面大，不建议轻动）。证据：`archive/portal-401/qa-coverage-report.md` S8/S8b |
 
 ### 1.6 📁 文档 / 资产整理（2026-09-19 新登记）
 

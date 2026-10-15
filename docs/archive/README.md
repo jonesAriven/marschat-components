@@ -91,7 +91,7 @@
 | 事项 | 处置 |
 |---|---|
 | 归档前的脱敏 | `portal-401/portal-401-e1-e3-findings.md`（QA 夹具明文口令 ×2）、`phase11/02-架构合理性评估与重构方案.md`（明文密钥引用 ×9）、`portal-401/portal-401-commit3-logging-spec.md`（历史共享密钥值 ×1）→ 均已替换为 `<REDACTED-*>` 占位符。**原文保留在原工作区**。 |
-| 归档后自检 | 对全目录扫描口令 / secret / 密钥值模式：**零残留**（2026-09-19） |
+| 归档后自检 | 对全目录扫描口令 / secret / 密钥值模式：**零残留**（2026-09-19）。**2026-10-15 全量复审补扫，抓出 2 处并已当场脱敏**：① `phase12/Phase12进度交接快照-2026-09-16.md:126` cosmic-studio 线上口令（该文件 10-15 才下沉入库，绕过了首扫）② `portal-401/portal-401-criteria5-findings.md:28` `PORTAL_JWT_SECRET` 残留 4 字符可读前缀（首扫不彻底）→ 均已替换 `<REDACTED-*>` 占位符，原文留 git 历史与源会话工作区。**纪律补丁**：今后凡文件下沉入库，必须当场过一遍口令 / secret 模式扫描再算完成（见 `../README.md`《文档命名与下沉纪律》第 4 条） |
 | 🔴 **高危待处置** | `D:\huliang\java\ideaworkspace\devtools\账密清单_审核用.md`（5.7KB，**未被 git 跟踪** ✅）—— 含**全栈明文凭据**：SSH 口令、MySQL root、Nacos/MinIO/MeiliSearch/MongoDB 口令、`JWT_SECRET` / `CRYPTO_AES_KEY` / `MEILI_MASTER_KEY` / Vaultwarden ADMIN_TOKEN。文件自带「审核后删除」字样。**建议：凭据入 Vaultwarden 后删除该文件**（已登记 `../STATUS.md` T-DOC-3） |
 | 其他 | `active-manager/docs/v2/{deploy,usage}.md` 亦含明文口令，随其留在应用仓 —— 建议一并清理（已登记） |
 
@@ -101,8 +101,5 @@
 
 1. **archive 只提供"当初为何这样"的可追溯性**，**不作为现状依据**。任何与 `../README.md`、`../STATUS.md` 冲突的表述，以现行文档为准。
 2. 本目录内的报告多为**倒序追加**（如 `portal-401/REPORT-2026-09-18.md` 结论以最上面一节为准），**早期章节可能已被自身后续推翻** —— 引用前务必确认节序。
-3. **必须原样保留的"未证实边界"**（不得升格为已确认缺陷）：
-   - 「**真实用户会被 portal 踢**」**至今未被证实** —— 全部观测来自自动化夹具，7 次命中按小时仅落 3 个桶且与测试窗口一一对齐，**高度疑似夹具自触发**。
-   - portal 401 的 token 来源**仍未定位**；E0 采样日志（已上线）是为定格它而补的观测手段。
-   - 对外表述只能是「portal 存在一条会硬踢的 401 处理路径」，**不能**表述为「portal 有并发被踢缺陷」。
+3. ⚠️ **本条原「未证实边界」已于 2026-10-08 作废（2026-10-15 订正）**：原口径称「真实用户会被 portal 踢至今未被证实、高度疑似夹具自触发，只能说 portal 存在一条会硬踢的 401 处理路径、不能说 portal 有并发被踢缺陷」——**已被 `../TROUBLESHOOTING.md` §8.6/§9 与 `../STATUS.md` T-ENG-9 正式推翻**：真因为 hutool `JWTSigner` 非线程安全（并发验签算错 → `BAD_SIGNATURE`），修复前混发实验 **5/60（≈8%）失败**、修复后 **120 次 0 失败** + 真浏览器 **7/7 PASS**，已修上线（流水线 #843）⇒ **portal 确有并发被踢缺陷、已修复**；「token 来源未定位」亦已闭合（同 §9）。归档内 `portal-401/REPORT-2026-09-18.md` §2.1、`criteria3-closure.md`、`criteria5-findings.md`、`e1-e3-findings.md`、`commit3-logging-spec.md` §4 的相关归因表述**一律以 §8.6/§9 为准**，勿再引用「未证实」口径。
 4. 相关现行条目：`../TROUBLESHOOTING.md` §9（portal 401 与新约定陷阱）、`../STATUS.md`（未决项）。

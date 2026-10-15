@@ -25,7 +25,7 @@
 **结果**（【已证实】）：
 ```
 AUTH_CENTER_ISSUER=https://auth.marschat.online
-PORTAL_JWT_SECRET=k2Sd...（已脱敏）
+PORTAL_JWT_SECRET=<REDACTED-PORTAL-JWT-SECRET>（已脱敏，2026-10-15 抹除残留 4 字符前缀）
 ```
 - **容器 env 中不存在 `PORTAL_JWT_ISSUER`** ⇒ 应用取 `application.yml:66` 默认值 **`marschat-portal`**。
 - `grep PORTAL_JWT_ISSUER /root` **零命中** ⇒ 未见部署/compose 对该变量的覆盖。
