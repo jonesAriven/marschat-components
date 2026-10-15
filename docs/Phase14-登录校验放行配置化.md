@@ -93,9 +93,11 @@ Spring MVC 拦截器与 Spring Security `requestMatchers` 均按 **context-path 
 
 ## 7. 遗留与后续
 
-- **T-ENG-7 补机制二选一待良哥拍板**（A 动 auth-center 枢纽 / B portal 侧放宽，推荐 B）—— 与本轮无关，单独挂起。
-- activecode 匿名 generate 的频控 / 验证码 —— 已提出，待回应。
-- cosmic 中间件目前只认 `Authorization: Bearer`；带票 200 已在端到端断言覆盖。
+> ⏳ **时点声明（2026-10-15）**：本节为收官时点登记。**未决项唯一真源 = `docs/STATUS.md`** —— 本节仅存指针，勿据此开工。
+
+- **T-ENG-7 补机制二选一待良哥拍板**（A 动 auth-center 枢纽 / B portal 侧放宽，推荐 B）—— 与本轮无关，单独挂起 → `STATUS.md` §1.2 **T-ENG-7**。
+- activecode 匿名 generate 的频控 / 验证码 → `STATUS.md` §1.4 **T-LOW-19**。
+- cosmic 中间件目前只认 `Authorization: Bearer`；带票 200 已在端到端断言覆盖 → `STATUS.md` §1.4 **T-LOW-20**。
 
 ---
 

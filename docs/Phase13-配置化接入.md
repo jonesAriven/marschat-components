@@ -276,10 +276,12 @@ activecode 是**纯静态页**（无 `package.json` / 打包器 / `vue-router`�
 
 ## 7. 遗留与后续
 
+> ⏳ **时点声明（2026-10-15）**：本节为 **2026-10-05 收官时点**的遗留登记快照。**未决项唯一真源 = `docs/STATUS.md`**（§1.1 拍板 / §1.2 发版 / §1.4 技术债）—— 本节仅记录当时的判断与闭合轨迹，**勿据此开工**；条目最新状态一律以 `STATUS.md` 为准。
+
 | # | 事项 | 归属 |
 |---|---|---|
 | T-ENG-2 | 发布 `app-kit` + `auth-core@2.2.0` | ✅ **已闭合**（app-kit 累计发到 **0.1.4**，auth-core 2.2.0） |
-| **T-ENG-7** | 🆕 **portal 存量 admin 账号授权普查** | 本轮恢复中心权限点校验后，普通 `role=admin` 账号会401（中心的 `sys_permission` 表无 `api:admin` 权限点）。**迁移前是放行的** ⇒ 需普查存量 admin 并补授权。见 `STATUS.md` §1.2 |
+| **T-ENG-7** | 🆕 **portal 存量 admin 账号授权普查** | ⚠️ **本文原结论「中心的 `sys_permission` 表无 `api:admin` 权限点」已被 2026-10-09 实测推翻**（权限点存在，`id=2493`；真因 = 应用级角色无自动补齐机制）。**以 `STATUS.md` §1.2 T-ENG-7 为准**（待良哥拍板二选一） |
 | **T-ENG-8** | 🆕 **portal 账密凭据链修复** | ✅ 已修并真机验证（账密 admin 访问管理面 200）。⚠️ 遗留：`clearUserCredentials()` 暂无调用方（`/auth/logout` 是空实现），**该端点恢复真实语义时必须接上**，否则登出后服务端残留可用凭据 |
 | T-ENG-3 | 6 应用迁移（消除 BFF 安全边界分叉） | `STATUS.md` §1.2 |
 | T-ENG-4 | `menus.ts` 由 `menu-registry.yml` 生成（消灭双份定义） | `STATUS.md` §1.2 |

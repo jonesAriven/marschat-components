@@ -9,22 +9,22 @@
 > `@marschat/app-kit` **0.1.4**（装配层，Phase 13 新增；已发布 Nexus npm-hosted）｜ `@marschat/auth-components` **0.8.8**（0.8.8 = app 作用域身份只读，D-3 收口；已发布 Nexus npm-hosted）｜ `@marschat/frontend-common` 0.3.5 ｜ `com.marschat:auth-core` **2.3.0**（2.3.0 = 登录校验放行配置化 `marschat.auth.anonymous`，Phase 14 新增；2.2.0 = BFF 管理代理自动装配；已发布 Nexus maven-releases）｜ `com.marschat:common-core` 1.1.6
 > 6 应用（portal / activecode / kb-web / **cosmic-studio**（client-id，历史文档简写 cosmic）/ kb-ops / infra-monitor）的**登录页、SSO、统一鉴权、权限体系**全部接入。
 >
-> **📚 文档地图**（本目录）
->
-> | 文档 | 定位 | 时效 |
-> |---|---|---|
-> | `README.md`（本文） | 权威手册：设计 / 接入 / 使用运维 | **现行态**，随代码更新 |
-> | `STATUS.md` | **未决项与待办**：优先级清单 + 待拍板 + 已知取舍 + 下一轮路线 | 现行态，**接手先读** |
-> | `CONFIG-REFERENCE.md` | 配置项 / 环境变量 / 端点 / 已注册 client / 数据库真源 全表 | 现行态，随 registry 更新 |
-> | `PHASE13-CONFIG-DRIVEN-ONBOARDING.md` | **配置化接入（三处配置 + 一行装配）**：审计 → 设计 → 实现 → 自测 → 迁移路线 | 现行态（2026-10-05） |
-| `PHASE14-ANONYMOUS-PATHS.md` | **登录校验放行配置化**（`marschat.auth.anonymous` / `anonymous-paths.json`）：设计 → 三范式 → 五应用迁移记录 → 验证 | 现行态（2026-10-15） |
-> | `TROUBLESHOOTING.md` | 排查手册：症状 → 定位 → 根因 + 取证命令集 | 现行态 |
-> | `VERIFY-REPORT-2026-09-17.md` | Phase 12 全量验证报告（102 用例 / 0 真实失败） | 快照（2026-09-17） |
-> | `PHASE12-ROUND6-2026-09-18.md` | R6 多轮浏览器回归与缺陷修复证据 | 快照（2026-09-18） |
-> | `PHASE12-SUMMARY-2026-09-17.md` | Phase 12 收口汇总（**结论已吸收进 `STATUS.md`**） | 历史快照（勿单独引用） |
-> | `PHASE12-PROGRESS-2026-09-16.md` | Phase 12 进度快照（**已被 SUMMARY 取代**） | 历史快照（勿单独引用） |
-> | `devtools/docs/adr/*.md` | ADR 决策史（Phase 0–12 全过程，含 §38 归档容器） | 决策史，勿当现行态 |
-> | `archive/` | **归档**：22 份历史与过程材料（Phase 12 设计规格 / portal 401 专项 / Phase 11 复盘 / activecode UMD 机制） | 历史，勿当现行态 —— 索引见 `archive/README.md` |
+**📚 文档地图**（本目录）
+
+| 文档 | 定位 | 时效 |
+|---|---|---|
+| `README.md`（本文） | 权威手册：设计 / 接入 / 使用运维 | **现行态**，随代码更新 |
+| `STATUS.md` | **未决项与待办**：优先级清单 + 待拍板 + 已知取舍 + 下一轮路线 | 现行态，**接手先读** |
+| `CONFIG-REFERENCE.md` | 配置项 / 环境变量 / 端点 / 已注册 client / 数据库真源 全表 | 现行态，随 registry 更新 |
+| `Phase13-配置化接入.md` | **配置化接入（三处配置 + 一行装配）**：审计 → 设计 → 实现 → 自测 → 迁移路线 | 现行态（2026-10-05） |
+| `Phase14-登录校验放行配置化.md` | **登录校验放行配置化**（`marschat.auth.anonymous` / `anonymous-paths.json`）：设计 → 三范式 → 五应用迁移记录 → 验证 | 现行态（2026-10-15） |
+| `TROUBLESHOOTING.md` | 排查手册：症状 → 定位 → 根因 + 取证命令集 | 现行态 |
+| `archive/phase12/Phase12全量验证报告-2026-09-17.md` | Phase 12 全量验证报告（102 用例 / 0 真实失败） | 快照（2026-09-17） |
+| `archive/phase12/R6多轮浏览器回归与缺陷修复-2026-09-18.md` | R6 多轮浏览器回归与缺陷修复证据 | 快照（2026-09-18） |
+| `archive/phase12/Phase12收口汇总-2026-09-17.md` | Phase 12 收口汇总（**结论已吸收进 `STATUS.md`**） | 历史快照（勿单独引用） |
+| `archive/phase12/Phase12进度交接快照-2026-09-16.md` | Phase 12 进度快照（**已被收口汇总取代**） | 历史快照（勿单独引用） |
+| `devtools/docs/adr/*.md` | ADR 决策史（Phase 0–12 全过程，含 §38 归档容器） | 决策史，勿当现行态 |
+| `archive/` | **归档**：27 份历史与过程材料（Phase 12 设计规格 / portal 401 专项 / Phase 11 复盘 / activecode UMD 机制 / Phase 12 过程快照与验证报告） | 历史，勿当现行态 —— 索引见 `archive/README.md` |
 >
 > ⚠️ **Phase 11/12 修正（2026-09-15/16 两轮全量复核）**：Phase 10 曾写「初衷达成」，复核发现该结论**被高估**——「独立账密」路径此前仍是各应用本地校验（身份与口令分裂），且服务端并未真正区分「平台管理员 vs 应用管理员」。现已定型（详见 §6.0 / §8）：
 > ✅ **账密真源归一：六应用全部完成** —— portal / infra-monitor / activecode / cosmic-studio 经 BFF 转发中心；**kb-web 账密早已由 kb-gateway 直转中心**、**kb-ops 无账密入口**（`showLocalLogin:false`）、kb-gateway 只验签不读写用户表（见 ADR-2026-09-15 §1.2 **D8，2026-09-16 更正**）。
@@ -231,7 +231,7 @@ auth-center（:8085，唯一身份与授权真源）
 
 > 目标：新应用从零接入**统一登录 + 统一鉴权 + 权限体系**，全程**不改 auth-center Java**。
 > 机器可读配置真源：`devtools/apps-registry.yml` + 各应用 `menu-registry.yml` + 各应用 `bff-whitelist.yml` + 各应用 `marschat.auth.anonymous`（Java 侧 `application.yml` / cosmic-studio 为 classpath `anonymous-paths.json`）；**字段语义、环境变量、端点全表见 `docs/CONFIG-REFERENCE.md`**。
-> 演进记录与审计依据见 `docs/PHASE13-CONFIG-DRIVEN-ONBOARDING.md` 与 `docs/PHASE14-ANONYMOUS-PATHS.md`。
+> 演进记录与审计依据见 `docs/Phase13-配置化接入.md` 与 `docs/Phase14-登录校验放行配置化.md`。
 
 ## 🆕 配置化接入（Phase 13 起 · 推荐路径）
 
@@ -364,7 +364,7 @@ registry.addInterceptor(jwtInterceptor)
 3. **cosmic 范式 = deny-by-default**。`/api/**` 未放行且无 `Bearer` 头 → 401 `{"detail":"未登录"}`（把「完全裸奔」收紧为「需持票」）；
    非 `/api`（SPA/静态）与 OPTIONS 预检一律放行；启动时 `audit_open_surface` 全量审计开放面，两类漂移（未声明的受护路由 / 清单与依赖重叠）打 WARN。
 
-字段全表见 `CONFIG-REFERENCE.md` §4.6 / §5.3；各应用迁移实录与验证证据见 `PHASE14-ANONYMOUS-PATHS.md`。
+字段全表见 `CONFIG-REFERENCE.md` §4.6 / §5.3；各应用迁移实录与验证证据见 `Phase14-登录校验放行配置化.md`。
 
 ### 脚手架
 
@@ -377,7 +377,7 @@ node scripts/scaffold-app.mjs --app-id marschat-demo --context-path /demo --out 
 
 1. 前端：按上面替换 `main.ts` 装配；用 `tokenKeyPrefix` 传旧前缀（如 `'kb_'`）保住老用户登录态。
 2. 后端：把硬编码白名单改写成 `bff-whitelist.yml`，删除自家的 `AdminProxyController` / `CenterSessionStore` / `LocalAccountReporter`，打开 `marschat.bff.enabled`（**顺序铁律**：必须先删旧代理再开 `enabled`，两者都映射 `/api/admin/**` ⇒ `Ambiguous mapping` 启动崩溃）。
-3. `portal` **不要**传 `sessionMode: 'bff'` —— 迁移时实测该做法是错的：portal 是**双模**（账密 + SSO 并存），传 `'bff'` 会让真 SSO 会话也失去 SLO 联动。正解 = 默认 `'oidc'` + `watchSession: () => isOidcToken()`（详见 `PHASE13-CONFIG-DRIVEN-ONBOARDING.md` §5 步 6）。
+3. `portal` **不要**传 `sessionMode: 'bff'` —— 迁移时实测该做法是错的：portal 是**双模**（账密 + SSO 并存），传 `'bff'` 会让真 SSO 会话也失去 SLO 联动。正解 = 默认 `'oidc'` + `watchSession: () => isOidcToken()`（详见 `Phase13-配置化接入.md` §5 步 6）。
 4. 灰度：`enabled` 默认 false，逐个应用切换；回滚即设回 false。
 5. **双模应用**（账密 + SSO 并存，如 kb-web / cosmic / portal）必须传 `watchSession: () => isOidcToken()`；布尔 `true` 越不过 `sessionMode` 闸门，会复现 2026-09-15「3 秒被误踢」事故。
 
@@ -656,7 +656,7 @@ apis:                       # ⚠️ api 点任何模式都不自动授予，写
 - 历史文档提到的 `wb_p10_regress.py` / `wb_runall.py` 等一批 Phase 10 脚本**已随工作区清理而丢失**，不要再按旧名引用。
 - 常驻回归账号：`p10x`（id=302）。**测试务必用常驻低权账号** —— 用户名删除后有墓碑、不可复建（坑 #20）。
 
-> **Phase 12 全量验证（2026-09-17）**：**102 用例 / 0 真实失败**，结果与复现方式见 `docs/VERIFY-REPORT-2026-09-17.md`；覆盖平台基线、数据真源、6 应用接入面、三层权限边界、R8 自锁、BFF 白名单、HPP、浏览器级 SSO 免登与 app 作用域只读。
+> **Phase 12 全量验证（2026-09-17）**：**102 用例 / 0 真实失败**，结果与复现方式见 `archive/phase12/Phase12全量验证报告-2026-09-17.md`；覆盖平台基线、数据真源、6 应用接入面、三层权限边界、R8 自锁、BFF 白名单、HPP、浏览器级 SSO 免登与 app 作用域只读。
 >
 > **线上排查先看 `docs/TROUBLESHOOTING.md`**（症状 → 定位路径 → 根因 + 取证命令集 + 「已知误判清单」）；**未决项与待办看 `docs/STATUS.md`**。
 
@@ -700,3 +700,13 @@ pnpm publish --filter @marschat/auth-components    #（+ frontend-common；Nexus
 
 > 演进全记录：`devtools/docs/adr/ADR-2026-09-10-平台重构Phase0清死代码.md`（§26-33 六应用接入/双作用域/账号映射 · §34 接入指南落盘 · §35-36 权限默认最小权限/双前缀根治 · §37 收口+扩测+点击巡检）。
 > 包内组件级用法（LoginPage/LoginPanel/ForgotPassword 等）以 `packages/*/README.md` 与 `packages/auth-components/*.md` 为准。
+
+---
+
+## 附录：文档命名与下沉纪律（2026-10-15 立）
+
+1. **命名**：phase 决策 / 记录文档一律**中文命名** `Phase<NN>-<主题>.md`（如 `Phase13-配置化接入.md` / `Phase14-登录校验放行配置化.md`）；**顶层只放现行 phase**（当前 = Phase 13 / Phase 14 两份）。
+2. **下沉**：phase 收口后，其过程快照 / 验证报告 / 多轮回归记录**下沉** `archive/phase<NN>/`（如 Phase 12 四份于 2026-10-15 下沉），顶层不留历史快照；下沉时**留存价值必须写进** `archive/README.md` 索引表「为什么值得留」列，不许只搬不注。
+3. **待办不双维护**：未决项唯一真源 = `STATUS.md`；phase 文档 §7 只允许留**指针 + 时点声明**，禁止另开待办清单（历史教训：手册与 ADR / phase 文档长期双维护待办，结论互相漂移）。
+4. **改名必查跨仓引用**：任何文档改名 / 移动后，必须**全仓 + 跨仓 grep 旧名**（本仓 + devtools 各应用迁移记录 + cosmic-studio），**零残留**方算完成；引用一律改写新名（仓内相对路径 / 跨仓 `marschat-components/docs/<新名>`）。
+5. **份数同步**：`archive/README.md` §一与 `STATUS.md` T-DOC-1 的归档份数，随下沉 / 归档**即时更新**，禁留过期数字。
