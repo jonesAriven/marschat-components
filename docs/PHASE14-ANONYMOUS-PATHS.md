@@ -89,7 +89,7 @@ Spring MVC 拦截器与 Spring Security `requestMatchers` 均按 **context-path 
 | activecode | #848 | ✅ SUCCESS（101s） | 见本节末「汇总」 |
 | portal-server | #849 | ✅ SUCCESS（152s） | 见本节末「汇总」 |
 | kb-ops | #850 | ✅ SUCCESS（158s，130 单测全过） | 见本节末「汇总」 |
-| infra-monitor | 待补 | 待补 | 待补 |
+| infra-monitor | #851 | ✅ SUCCESS（161s） | 见本节末「汇总」 |
 
 ## 7. 遗留与后续
 
@@ -108,7 +108,7 @@ Spring MVC 拦截器与 Spring Security `requestMatchers` 均按 **context-path 
 | activecode（.182:18080） | `POST /activecode/api/activation/verify` → **200**「激活码不能为空」（到达路由）· `GET /activecode/api/activation/config/default-expire` → **200** 配置 · `POST /activecode/api/activation/generate`（方法级）→ **200**「序列号不能为空」（到达路由） | `GET /activecode/api/activation/list` → **401**「未登录或会话已过期」 |
 | portal（.105:8087） | `GET /portal/actuator/health` → **200** UP · `GET /portal/api/auth/sso/authorize?...` → **400**（参数校验，到达路由）· `POST /portal/api/auth/sso/exchange` → 到达路由（`state` 为空时 500，见下） | `GET /portal/api/sys/system/list` → **401**「未登录或登录已过期」 |
 | kb-ops（.105:8084） | `GET /kb-ops/actuator/health` → **200** UP（db/redis/ping 全 UP） | `GET /kb-ops/api/host/list` → **401**「未登录或登录已过期」 |
-| infra-monitor | 待部署后补 | 待部署后补 |
+| infra-monitor（.105:8088 host 网络，SSH 侧实测） | `GET /infra/actuator/health` → **200** UP · `GET /infra/auth/login` → **405**「请求方法不支持: GET」（POST-only，到达路由）· `POST /infra/auth/mail-login/send-code` 空 body → **200**「缺少邮箱」（到达路由） | `GET /infra/auth/permissions` → **401**（🔴 故意不在清单，安全边界保持） |
 | cosmic-studio（.105:8310） | 见 §6 表（health 200 / login 422） | `GET /api/projects` → **401** `{"detail":"未登录"}` |
 
 **顺带发现并修复（portal 既有缺陷，非本轮引入）**：`POST /portal/api/auth/sso/exchange` 不带 `state` 时，
