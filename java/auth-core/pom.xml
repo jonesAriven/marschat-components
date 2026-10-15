@@ -14,6 +14,11 @@
         · 凭据模式可配：passthrough / session-store / auto，收敛三份行为已分叉的手写实现
         · 本地账号上报：BffAccountSource SPI，取代三份 95~111 行重复实现
         · 默认 enabled=false，对既有应用零影响
+      - 2026-10-15 (2.3.0)：新增登录校验放行配置化白名单（com.marschat.auth.anonymous）
+        · marschat.auth.anonymous 两级清单（paths 路径级 + endpoints 方法级），写值即整体替换
+        · 登录保底集（登录/SSO/邮箱码/改密/session/favicon）代码合并、配置不可清空，防误配锁死登录
+        · 保底段按 context-path 双形态生成，兼容「后端可见带前缀/nginx 已剥前缀」两种历史形态
+        · 首发于 activecode（2026-10-14），本轮上沉公共库：portal / kb-ops / infra-monitor 随之迁移
       - 前身为各服务各自复制的 JwtTokenProvider / JwtUtil / FeignConfig
       - 下游引入后自动装配 TokenProvider，无需再手写 JWT 工具类
       - Gitee: git@gitee.com:jonesAriven/auth-core.git
@@ -27,9 +32,9 @@
 
     <groupId>com.marschat</groupId>
     <artifactId>auth-core</artifactId>
-    <version>2.2.0</version>
+    <version>2.3.0</version>
     <name>auth-core</name>
-    <description>认证公共库（独立 jar）：jjwt HS256 验签 + OIDC RS256 双验签 / LoginUser 解析 / Feign token 透传 / BFF 管理代理（白名单配置化 + 凭据模式可配 + 本地账号上报）—— SSO Phase 2 + Phase 13 配置化接入</description>
+    <description>认证公共库（独立 jar）：jjwt HS256 验签 + OIDC RS256 双验签 / LoginUser 解析 / Feign token 透传 / BFF 管理代理（白名单配置化 + 凭据模式可配 + 本地账号上报）/ 登录校验放行配置化白名单（marschat.auth.anonymous）—— SSO Phase 2 + Phase 13 配置化接入</description>
 
     <scm>
         <connection>scm:git:git@gitee.com:jonesAriven/auth-core.git</connection>

@@ -5,8 +5,8 @@
 > **文档分工**：本文 = **现行态**（怎么设计 / 怎么接入 / 怎么运维）｜ `docs/STATUS.md` = **进行中**（未决项与待办）｜ `docs/TROUBLESHOOTING.md` = **故障排查**｜ `devtools/docs/adr/*` = **决策史**（当初为何这样定、走过哪些弯路）。
 > ⚠️ **冲突裁定**：同一事实若本文与 ADR 不一致，**以反映最新线上实测的一方为准，并当场回写本文**——不要两处各说各话（历史教训：手册与 ADR 长期漂移，如用户真源表名 `user` vs `sys_user`、F1 密钥共享处数、Phase 11 待办状态）。
 >
-> **版本基线（2026-10-07 实测态；配置项与环境变量全表见 `docs/CONFIG-REFERENCE.md`）**
-> `@marschat/app-kit` **0.1.4**（装配层，Phase 13 新增；已发布 Nexus npm-hosted）｜ `@marschat/auth-components` **0.8.8**（0.8.8 = app 作用域身份只读，D-3 收口；已发布 Nexus npm-hosted）｜ `@marschat/frontend-common` 0.3.5 ｜ `com.marschat:auth-core` **2.2.0**（2.2.0 = BFF 管理代理自动装配，Phase 13 新增；已发布 Nexus maven-releases）｜ `com.marschat:common-core` 1.1.6
+> **版本基线（2026-10-15 实测态；配置项与环境变量全表见 `docs/CONFIG-REFERENCE.md`）**
+> `@marschat/app-kit` **0.1.4**（装配层，Phase 13 新增；已发布 Nexus npm-hosted）｜ `@marschat/auth-components` **0.8.8**（0.8.8 = app 作用域身份只读，D-3 收口；已发布 Nexus npm-hosted）｜ `@marschat/frontend-common` 0.3.5 ｜ `com.marschat:auth-core` **2.3.0**（2.3.0 = 登录校验放行配置化 `marschat.auth.anonymous`，Phase 14 新增；2.2.0 = BFF 管理代理自动装配；已发布 Nexus maven-releases）｜ `com.marschat:common-core` 1.1.6
 > 6 应用（portal / activecode / kb-web / **cosmic-studio**（client-id，历史文档简写 cosmic）/ kb-ops / infra-monitor）的**登录页、SSO、统一鉴权、权限体系**全部接入。
 >
 > **📚 文档地图**（本目录）
@@ -17,6 +17,7 @@
 > | `STATUS.md` | **未决项与待办**：优先级清单 + 待拍板 + 已知取舍 + 下一轮路线 | 现行态，**接手先读** |
 > | `CONFIG-REFERENCE.md` | 配置项 / 环境变量 / 端点 / 已注册 client / 数据库真源 全表 | 现行态，随 registry 更新 |
 > | `PHASE13-CONFIG-DRIVEN-ONBOARDING.md` | **配置化接入（三处配置 + 一行装配）**：审计 → 设计 → 实现 → 自测 → 迁移路线 | 现行态（2026-10-05） |
+| `PHASE14-ANONYMOUS-PATHS.md` | **登录校验放行配置化**（`marschat.auth.anonymous` / `anonymous-paths.json`）：设计 → 三范式 → 五应用迁移记录 → 验证 | 现行态（2026-10-15） |
 > | `TROUBLESHOOTING.md` | 排查手册：症状 → 定位 → 根因 + 取证命令集 | 现行态 |
 > | `VERIFY-REPORT-2026-09-17.md` | Phase 12 全量验证报告（102 用例 / 0 真实失败） | 快照（2026-09-17） |
 > | `PHASE12-ROUND6-2026-09-18.md` | R6 多轮浏览器回归与缺陷修复证据 | 快照（2026-09-18） |
@@ -229,8 +230,8 @@ auth-center（:8085，唯一身份与授权真源）
 # 第二篇 接入
 
 > 目标：新应用从零接入**统一登录 + 统一鉴权 + 权限体系**，全程**不改 auth-center Java**。
-> 机器可读配置真源：`devtools/apps-registry.yml` + 各应用 `menu-registry.yml` + 各应用 `bff-whitelist.yml`；**字段语义、环境变量、端点全表见 `docs/CONFIG-REFERENCE.md`**。
-> 演进记录与审计依据见 `docs/PHASE13-CONFIG-DRIVEN-ONBOARDING.md`。
+> 机器可读配置真源：`devtools/apps-registry.yml` + 各应用 `menu-registry.yml` + 各应用 `bff-whitelist.yml` + 各应用 `marschat.auth.anonymous`（Java 侧 `application.yml` / cosmic-studio 为 classpath `anonymous-paths.json`）；**字段语义、环境变量、端点全表见 `docs/CONFIG-REFERENCE.md`**。
+> 演进记录与审计依据见 `docs/PHASE13-CONFIG-DRIVEN-ONBOARDING.md` 与 `docs/PHASE14-ANONYMOUS-PATHS.md`。
 
 ## 🆕 配置化接入（Phase 13 起 · 推荐路径）
 
@@ -319,6 +320,51 @@ marschat:
 自动装配（`MarschatBffAutoConfig`）：白名单校验（默认拒绝 + HPP 加固）· 凭据解析（三模式）·
 fail-closed 401 · 状态码与响应体透传 · 本地账号上报（提供 `BffAccountSource` Bean 时）。
 **不配置 `enabled` = 不装配**，对既有应用零影响。
+
+### 登录校验放行配置化（Phase 14 起 · auth-core 2.3.0）
+
+> **一句话**：哪些路径「免登录可达」不再是代码里的硬编码清单，而是配置 ——
+> Java 应用写 `application.yml` 的 `marschat.auth.anonymous`，cosmic-studio（Python/FastAPI，auth-core 覆盖不到）写 classpath `anonymous-paths.json`。
+> **写值即整体替换**；登录保底集在代码内强制合并、**配置不可清空**（防误配把登录链路打断导致没人能登录）。
+
+**三范式对照**（按应用形态选，配置语义完全一致）：
+
+| 形态 | 拦截点 | 代码侧 | 配置侧 | 已迁移应用 |
+|---|---|---|---|---|
+| Spring MVC 拦截器 | `HandlerInterceptor` | `excludePathPatterns(anonymousAuth.effectivePaths()…)` | yml `marschat.auth.anonymous` | portal · activecode |
+| Spring Security | `SecurityFilterChain` | `requestMatchers(anonymousAuth.effectivePaths()…).permitAll()` | yml 同上 | kb-ops · infra-monitor |
+| Python / FastAPI | 纯 ASGI 中间件 `AnonymousAuthMiddleware` | 装配即注册（deny-by-default） | `anonymous-paths.json` | cosmic-studio |
+
+```yaml
+marschat:
+  auth:
+    anonymous:
+      paths:                       # 路径级，Ant 通配（** 跨段 / * 段内）；写值即整体替换
+        - /api/auth/login
+        - /api/auth/sso/**
+        - /actuator/**
+      endpoints:                   # 方法级精确匹配（可选，路径 + 方法全等）
+        - { path: /api/auth/permissions, methods: [GET] }
+```
+
+```java
+// Spring MVC 形态（portal / activecode）：构造注入 AnonymousAuthProperties
+registry.addInterceptor(jwtInterceptor)
+        .addPathPatterns("/api/sys/**", "/api/auth/userinfo" /* …其余受护路径 */)
+        .excludePathPatterns(anonymousAuth.effectivePaths().toArray(new String[0]));
+```
+
+**三条铁律**：
+
+1. **路径口径 = context-path 剥离后**。Spring MVC 拦截器与 Spring Security `requestMatchers` 都按**剥离部署前缀后**的路径匹配 ——
+   有前缀的应用（portal `/portal` · kb-ops `/kb-ops` · infra `/infra`）yml 里一律写**剥离后形态**，且**不要配** `anonymous.context-path`（配了只会生成永不命中的副本，无害但误导）；
+   仅当后端可见完整前缀时才显式配 `context-path`（当前仅 activecode：后端可见 `/activecode/api/**`）。
+2. **保底集是安全网，不是真相源**。登录链 5 条（`/api/auth/login` · `/api/auth/sso/authorize` · `/api/auth/sso/callback` · `/api/auth/mail-login` · `/api/auth/mail-login/send-code`）在代码内合并、配置不可清空；
+   若本应用登录端点是**别的形态**（如 infra-monitor 的 `/auth/login` 不带 `/api`），保底集覆盖不到，**必须**在 yml 显式声明。
+3. **cosmic 范式 = deny-by-default**。`/api/**` 未放行且无 `Bearer` 头 → 401 `{"detail":"未登录"}`（把「完全裸奔」收紧为「需持票」）；
+   非 `/api`（SPA/静态）与 OPTIONS 预检一律放行；启动时 `audit_open_surface` 全量审计开放面，两类漂移（未声明的受护路由 / 清单与依赖重叠）打 WARN。
+
+字段全表见 `CONFIG-REFERENCE.md` §4.6 / §5.3；各应用迁移实录与验证证据见 `PHASE14-ANONYMOUS-PATHS.md`。
 
 ### 脚手架
 
@@ -422,7 +468,9 @@ marschat:
 
 ```java
 // SecurityConfig —— 坑 #2（最重要）：必须显式 401 entry point，否则默认 403 → 前端拦截器永不触发 → 假死
-.authorizeHttpRequests(a -> a.requestMatchers("/auth/login","/auth/mail-login","/auth/mail-login/send-code").permitAll()
+// 放行清单配置化（Phase 14）：effectivePaths() = 登录保底集 ∪ yml paths，禁再硬编码（见上方「登录校验放行配置化」）
+.authorizeHttpRequests(a -> a.requestMatchers(anonymousAuth.effectivePaths().toArray(new String[0])).permitAll()
+                              .requestMatchers(HttpMethod.OPTIONS, "/**").permitAll()  // CORS 预检与登录校验无关，保持硬编码
                               .anyRequest().authenticated())
 .exceptionHandling(e -> e.authenticationEntryPoint((req,res,ex) -> res.sendError(401, "Unauthorized")))
 .addFilterBefore(jwtAuthFilter, UsernamePasswordAuthenticationFilter.class);
@@ -486,6 +534,7 @@ apis:                       # ⚠️ api 点任何模式都不自动授予，写
 - [ ] 管理面 BFF = **白名单默认拒绝**，且**先查白名单再取 token**（未登记路径直接 404，不转发、不泄漏）
 - [ ] BFF 透传**调用者本人** `Authorization`；拿不到 → 401（**无服务账号兜底**）
 - [ ] 每应用**独立** `JWT_SECRET`（≥64B 随机，禁弱默认样式）
+- [ ] 登录放行清单走 `marschat.auth.anonymous` 配置化（**禁硬编码**）；yml 路径写 **context-path 剥离后**形态；登录端点非 `/api/auth/*` 形态的（如 infra `/auth/*`）已显式声明
 
 **D. 权限**
 - [ ] 写接口挂**方法级** `@RequirePermission("api:xxx")`（类级 `menu:*` 只作访问闸门）
@@ -563,6 +612,7 @@ apis:                       # ⚠️ api 点任何模式都不自动授予，写
 | **37** | **Console 里的「Failed to load resource: 404」不含 URL** —— 只看 `Log.entryAdded` 无法定性，容易把「一处 favicon」误判成「六个应用各有问题」 | 必须配合 `Network.responseReceived` 抓 URL；本轮据此把 6 条 404 收敛为同一个 `auth.marschat.online/favicon.ico`（已修） |
 | **38** | **Element Plus 下拉（`el-dropdown-menu`）未展开时不在 DOM，且默认 trigger 是 `hover` 不是 click** —— 自动化直接找「退出登录」按钮会 `NO-BUTTON`；补了「先点触发器」仍打不开（点击对 hover 无效） | 用 `Input.dispatchMouseEvent type=mouseMoved` **悬浮**触发（先移开再移入）；并把「按钮是否命中」单列一条断言，避免把「没点到」读成「功能坏了」 |
 | **39** | **断言子串要防「包含即通过」** —— 判据写 `'…/portal/' in url` 时，`/portal/login` 也含该子串，会「停在登录页却判 PASS」，下游断言全是假绿 | 登录态判据收紧为**三条件同时成立**：无密码框 + url 不含 `/login` + localStorage 有 token |
+| **40** | 放行清单配置化的**路径口径**：Spring MVC 拦截器与 Security 均按 context-path **剥离后**匹配；登录端点非 `/api/auth/*` 形态（如 infra `/auth/*`）保底集覆盖不到，**必须 yml 显式声明** | 误配 `context-path` 只会生成永不命中的副本（误导）；漏声明 → 登录页 401、全站登不进 |
 
 ---
 

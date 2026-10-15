@@ -2,7 +2,7 @@
 
 > **定位**：统一认证平台的**配置真源、字段语义、环境变量、端点、数据库表、域名端口**全表。接入新应用或排查配置时先查本文，不要去 ADR / 快照里翻。
 > **配套**：`README.md`（设计 · 接入 · 使用运维）· `STATUS.md`（未决项与待办）· `TROUBLESHOOTING.md`（故障排查）。
-> **时效**：截至 **2026-10-07**（新增 §5.2 app-kit 装配层字段全表）
+> **时效**：截至 **2026-10-15**（新增 §4.6 `anonymous-paths.json` 与 §5.3 `marschat.auth.anonymous.*` 字段全表）
 > 🔴 **本表不含任何口令 / secret 明文** —— 只写**字段与取值方式**，值一律见 Vaultwarden（`vault.marschat.online:8222`）或部署机 env。
 
 ---
@@ -14,12 +14,13 @@
 | `devtools/apps-registry.yml` | **平台应用注册单一真源**（OIDC 客户端 + 前端运行时配置） | ✅ **手工编辑点 ①** |
 | `<应用>/src/main/resources/menu-registry.yml` | 菜单与 api 权限点上报定义（classpath） | ✅ **手工编辑点 ②** |
 | `<应用>/src/main/resources/bff-whitelist.yml` | **管理代理白名单（Phase 13 新增）** —— 默认拒绝，未登记即 404 | ✅ **手工编辑点 ③** |
+| `<应用>/src/main/resources/application.yml` → `marschat.auth.anonymous` | **登录校验放行清单（Phase 14 新增）** —— 免登录可达路径；cosmic-studio 为 classpath `anonymous-paths.json`（见 §4.6） | ✅ **手工编辑点 ④** |
 | `auth-center/src/main/resources/clients.yml` | OIDC 客户端 L1 种子（供 `ClientsYmlLoader` 幂等写入 `sys_app_client`） | ❌ **AUTO-GENERATED，禁改** |
 | 各前端 `public/app-config.json` | 运行时配置（contextPath / apiBase / issuer / clientId） | ❌ **AUTO-GENERATED，禁改** |
 | `devtools/mykng/module-registry.yml` | 模块注册表（SSOT） | ✅ |
 
-> 📌 **「三处配置」原则**：接入一个新应用，手工编辑点只有上表前三行；
-> 其余接入面由 `@marschat/app-kit`（前端）与 `auth-core` 的 BFF 自动装配（后端）承担。
+> 📌 **「配置驱动」原则**：接入一个新应用，手工编辑点只有上表前四行（③ 为 Phase 13 新增、④ 为 Phase 14 新增）；
+> 其余接入面由 `@marschat/app-kit`（前端）与 `auth-core` 的 BFF / 匿名放行自动装配（后端）承担。
 
 ```bash
 # 改完 apps-registry.yml 必跑（产物 ① clients.yml ② 各前端 app-config.json）
@@ -161,6 +162,31 @@ rules:
 
 ---
 
+## 4.6 `anonymous-paths.json`（cosmic-studio 登录放行清单 · Phase 14 新增）
+
+> **定位**：cosmic-studio（Python / FastAPI，**auth-core jar 覆盖不到**）的免登录可达清单真源，
+> 由 `app/anonymous.py` 的 `AnonymousPaths.from_file()` 加载，语义对齐 auth-core 2.3.0 的 `marschat.auth.anonymous`（§5.3）。
+> 文件缺失 / JSON 损坏 → **降级为仅登录保底集**（安全方向），启动打 WARN **不阻断**。
+
+```json
+{
+  "paths": ["/api/health"],
+  "endpoints": []
+}
+```
+
+| 字段 | 必填 | 默认 | 语义 |
+|---|---|---|---|
+| `paths` | — | `[]` | 路径级放行清单，Ant 通配（`**` 跨段 / `*` 段内），**写值即整体替换** |
+| `endpoints` | — | `[]` | 方法级精确匹配：`{"path": "...", "methods": ["GET"]}`，方法大写全等 |
+
+**语义铁律**（与 Java 侧一致）：
+1. **登录保底集 5 条代码内合并、配置不可清空**：`/api/auth/login` · `/api/auth/sso/authorize` · `/api/auth/sso/callback` · `/api/auth/mail-login` · `/api/auth/mail-login/send-code`。
+2. **deny-by-default**：`/api/**` 未放行且无 `Bearer` 头 → 401 `{"detail":"未登录"}`；非 `/api`（SPA/静态）与 OPTIONS 预检一律放行。
+3. **启动审计**（`audit_open_surface`）：遍历全部路由，两类漂移打 WARN —— ① 未挂登录依赖却未声明（将被 401）② 清单与依赖重叠（冗余声明）。
+
+---
+
 ## 5. 环境变量清单
 
 | 变量 | 侧 | 作用 | 注意 |
@@ -246,6 +272,36 @@ homePath:     '<本应用路由表里真实存在的路径>',
 ```
 
 **0.1.4 兼容性**：`watchSession` 的布尔路径与 0.1.3 **逐格一致**（6/6 差分验证）⇒ 已迁应用升级零行为变化；不传新字段时 `tokenKeys` / `permissionsIssuer` / `clearExtraAuth` 均不生效。
+
+---
+
+### 5.3 `marschat.auth.anonymous.*`（登录校验放行 · Phase 14 新增）
+
+> 由 `AnonymousAuthAutoConfig` 绑定到 `AnonymousAuthProperties`（auth-core 2.3.0）。
+> `effectivePaths()` = **登录保底集**（代码内，配置不可清空）∪ `paths`；与 `endpoints`（方法级）共同构成放行面。
+> **不配置 = 仅保底集生效**，对既有应用零影响。
+
+| 属性 | 默认 | 语义 |
+|---|---|---|
+| `marschat.auth.anonymous.paths` | `[]` | 路径级放行清单，Ant 通配；**写值即整体替换**（不是追加） |
+| `marschat.auth.anonymous.endpoints` | `[]` | 方法级精确匹配（path + methods 全等） |
+| `marschat.auth.anonymous.context-path` | 不配 | 仅为「后端可见完整前缀」的应用生成带前缀副本（当前仅 activecode 配 `/activecode`）；配错只生成永不命中的副本 |
+
+**登录保底集（代码内，防误配锁死登录）**：`/api/auth/login` · `/api/auth/sso/authorize` · `/api/auth/sso/callback` · `/api/auth/mail-login` · `/api/auth/mail-login/send-code`
+（`context-path` 已配时按带前缀形态再生成一份副本）。
+
+**路径口径铁律**：Spring MVC 拦截器与 Spring Security `requestMatchers` 均按 **context-path 剥离后**的路径匹配。
+有部署前缀的应用（portal `/portal` · kb-ops `/kb-ops` · infra `/infra`）yml 写**剥离后形态**且**不配** `context-path`。
+
+**已迁移应用配置实录（2026-10-15）**：
+
+| 应用 | 形态 | yml / json 声明 | 说明 |
+|---|---|---|---|
+| activecode | MVC 拦截器 | 应用原有匿名路径 + `context-path: /activecode` | 后端可见完整前缀 `/activecode/api/**`，须显式配 context-path |
+| portal | MVC 拦截器 | `/api/auth/login` · `/api/auth/sso/**` · `/actuator/**` | 与旧 `excludePathPatterns` 声明三项一致（行为保持型迁移） |
+| kb-ops | Spring Security | `/actuator/**` | 纯 SSO 应用无本地登录端点，保底集为零行为变化安全网 |
+| infra-monitor | Spring Security | `/auth/login` · `/auth/mail-login` · `/auth/mail-login/send-code` · `/actuator/**` | 登录端点是 `/auth/*` 形态，**保底集覆盖不到必须显式声明**；`/auth/permissions` 故意不在清单（保持 `authenticated()`） |
+| cosmic-studio | FastAPI 中间件 | `anonymous-paths.json`：`/api/health` | deny-by-default，见 §4.6 |
 
 ---
 

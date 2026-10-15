@@ -4,3 +4,4 @@ com.marschat.auth.AuthFeignAutoConfig
 com.marschat.auth.authz.AuthzAutoConfig
 com.marschat.auth.menu.MenuReportAutoConfig
 com.marschat.auth.bff.MarschatBffAutoConfig
+com.marschat.auth.anonymous.AnonymousAuthAutoConfig
