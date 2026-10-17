@@ -46,6 +46,48 @@ export interface RuntimeConfig {
   entry?: string
 }
 
+/**
+ * 运行时配置 `app-config.json` 的**探测候选基址**（纯函数，可单测）。
+ *
+ * 🔴 缺陷背景（2026-10-17 多轮浏览器实测）：此前 `readRuntimeConfig()` 恒以 `/` 为基址，
+ *    对 **context-path 部署**的应用（`/kb` `/ops` `/infra` `/portal`）必然 404 ⇒ 返回 `{}`，
+ *    后果是 `apps-registry.yml` 派生的运行时配置**整份静默失效**（不报错，只是永远回落
+ *    内置默认 / 编译期 env），控制台还长期挂一条 404。正是手册里「不报错但功能坏」那一类。
+ *
+ * 候选顺序（首个返回 200 且能解析为对象者胜）：
+ *   ① 显式 `baseUrl` 且**不等于 `/`**（调用方明确知道部署前缀时，最可靠、零 404）
+ *   ② 当前 `pathname` 的**完整目录**（`/a/b/login` → `/a/b/`）—— 覆盖多级前缀
+ *   ③ `pathname` 的**首段**（`/infra/login` → `/infra/`）—— 覆盖单级前缀（绝大多数）
+ *   ④ `/`（根部署，恒为最后一个候选）
+ *
+ * ⚠️ 两条顺序铁律：
+ *   a. **完整目录必须先于首段** —— 否则多级前缀应用可能误命中上级应用自己的
+ *      `app-config.json`（拿错配置比拿不到更危险）。
+ *   b. **`/` 恒在最后** —— 显式传 `/` 视为「未指定」（它就是本函数的默认值）。
+ *      若把 `/` 排在最前，context-path 应用会先打一发必然 404 的根请求，
+ *      控制台长期挂一条 404（本次实测的可见症状）。
+ */
+export function runtimeConfigCandidates(baseUrl?: string, pathname?: string): string[] {
+  const out: string[] = []
+  const push = (raw?: string): void => {
+    if (!raw) return
+    const withSlash = raw.startsWith('/') ? raw : `/${raw}`
+    const normalized = withSlash.endsWith('/') ? withSlash : `${withSlash}/`
+    if (!out.includes(normalized)) out.push(normalized)
+  }
+  const explicit = baseUrl && baseUrl !== '/' ? baseUrl : undefined
+  push(explicit)
+  const segments = (pathname || '/').split('/').filter(Boolean)
+  if (segments.length >= 2) {
+    push(`/${segments.slice(0, -1).join('/')}`)   // 完整目录（去掉最后一段「页面名」）
+  }
+  if (segments.length >= 1) {
+    push(`/${segments[0]}`)                        // 首段前缀
+  }
+  push('/')
+  return out
+}
+
 /** 会话模式：`oidc` = 浏览器直接持中心 OIDC token；`bff` = 服务端换票（如 portal）。 */
 export type SessionMode = 'oidc' | 'bff'
 

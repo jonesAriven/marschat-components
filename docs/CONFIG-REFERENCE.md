@@ -247,9 +247,17 @@ rules:
 > `src/config/runtime.ts`（或 `config.js`）。**唯一需要手写的接入代码就是这一段声明。**
 > 签名真源：`packages/app-kit/src/config.ts` 与 `src/types.ts`。
 
+> 🔴 **`runtime`（运行时配置）基址探测（0.1.5 起，坑 #41）**
+> `readRuntimeConfig(baseUrl?)` 不再恒以 `/` 为基址，而按候选顺序探测，首个返回「200 且可解析为对象」者胜：
+> `显式 baseUrl（≠ '/'）` → `pathname 完整目录` → `pathname 首段` → `/`。
+> **显式传 `/` 视为未指定**（`/` 是本函数默认值，恒排最后）。
+> 语义细节与单测见 `packages/app-kit/src/config.ts` 的 `runtimeConfigCandidates()`。
+> ⚠️ 修复前：`/kb` `/ops` `/infra` 这类子路径应用恒 404 ⇒ 运行时配置整份静默失效（不报错，只回落内置默认）。
+
 | 字段 | 类型 | 默认 | 语义与踩坑 |
 |---|---|---|---|
 | `appId` | `string` | **必填** | = `apps-registry.yml` 的 `client-id`；缺失即抛错 |
+| `runtime` | `RuntimeConfig` | `readRuntimeConfig()` 自动探测 | 显式传入可跳过探测（推荐在确知部署前缀时传 `readRuntimeConfig('/<ctx>')`，零多余请求） |
 | `contextPath` | `string` | `'/'` | 部署子路径。`normalizeContextPath` 归一（`kb`→`/kb`、`/kb/`→`/kb`） |
 | `apiBase` | `string` | `` `${base}/api` `` | 业务 API 基址 |
 | `authApiBase` | `string` | `` `${apiBase}/auth` `` | ⚠️ **同名不同义的坑**：这是**应用后端**的认证基址；登录页组件自己的 `authApiBase` 可能指向 **nginx 层的忘记密码通道**（如 portal 的 `/portal/auth-api` → kb-gateway）。**两者不可"统一"** |

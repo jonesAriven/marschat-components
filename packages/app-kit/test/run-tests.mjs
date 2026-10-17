@@ -13,6 +13,7 @@ import {
   mergeTokenKeys,
   appUrl,
   toRouterPath,
+  runtimeConfigCandidates,
   DEFAULT_WHITE_LIST_PATHS,
 } from '../src/config.ts'
 
@@ -231,6 +232,27 @@ console.log('\n[11] 会话监视判据 —— 布尔闸门语义（0.1.3 回归�
   // 布尔 vs 函数覆盖同一输入 → 结果一致（证明两条路径语义统一，无第二套判断）
   eq(decide(() => true, 'oidc'), decide(true, 'oidc'), '函数 true 与布尔 true 在 oidc 下一致')
   eq(decide(() => false, 'bff'), decide(false, 'oidc'), '函数 false 与显式关闭一致')
+}
+
+console.log('\n[12] 运行时配置探测候选 —— context-path 应用不再静默失效（2026-10-17 实测缺陷）')
+{
+  eq(runtimeConfigCandidates('/', '/infra/login'), ['/infra/', '/'],
+     '🔴 显式 / 视为未指定 → /infra/ 排在最前（context-path 应用零 404 命中真实配置）')
+  eq(runtimeConfigCandidates(undefined, '/infra/login'), ['/infra/', '/'],
+     '未显式传 + /infra/login → 同上（默认值即 /，同样视为未指定）')
+  eq(runtimeConfigCandidates('/portal', '/portal/login'), ['/portal/', '/'],
+     '显式 /portal → 去重后 [ /portal/, / ]（前缀归一 + 尾斜杠补齐）')
+  eq(runtimeConfigCandidates(undefined, '/kb/'), ['/kb/', '/'],
+     '未显式传 + /kb/ → [/kb/, /]（根候选兜底）')
+  eq(runtimeConfigCandidates(undefined, '/'), ['/'],
+     '根部署 → 只有 /（零多余请求，行为与旧版一致）')
+  eq(runtimeConfigCandidates(undefined, '/a/b/login'), ['/a/b/', '/a/', '/'],
+     '多级前缀 → 完整目录先于首段（防误命中上级应用的配置）')
+  eq(runtimeConfigCandidates('kb', '/kb/x'), ['/kb/', '/'],
+     '无前导斜杠的显式值被归一（kb → /kb/）')
+  // 🔴 去重铁律：显式值与推导值相同时不得重复请求（否则 context-path 应用每次多一次 404）
+  eq(runtimeConfigCandidates('/ops', '/ops/dashboard'), ['/ops/', '/'],
+     '显式与推导同源 → 去重，不产生重复请求')
 }
 
 console.log(`\n${'='.repeat(56)}`)

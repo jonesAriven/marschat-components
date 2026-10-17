@@ -42,6 +42,7 @@ import { createRequest, createAuthGuard, type TokenStore } from '@marschat/front
 import { createMarschatShell, type ShellOptions } from './shell'
 import {
   resolveAppConfig,
+  runtimeConfigCandidates,
   toRouterPath,
   type ResolvedAppConfig,
   type RuntimeConfig,
@@ -60,17 +61,26 @@ import type {
  * 不剥注释直接 `JSON.parse` 会抛错 → 运行时配置静默失效、回落编译期默认值。
  * 同步 XHR 是为了让消费方在模块求值期即可拿到常量（与既有各应用同口径）。
  */
-export function readRuntimeConfig(baseUrl = '/'): RuntimeConfig {
-  try {
-    const xhr = new XMLHttpRequest()
-    xhr.open('GET', `${baseUrl}app-config.json`, false)
-    xhr.send(null)
-    if (xhr.status === 200) {
+export function readRuntimeConfig(baseUrl?: string): RuntimeConfig {
+  const pathname = typeof window !== 'undefined' ? window.location.pathname : undefined
+  for (const base of runtimeConfigCandidates(baseUrl, pathname)) {
+    try {
+      const xhr = new XMLHttpRequest()
+      xhr.open('GET', `${base}app-config.json`, false)
+      xhr.send(null)
+      if (xhr.status !== 200) {
+        continue                      // 本候选不存在，换下一个（不写日志，避免控制台噪音）
+      }
       const raw = xhr.responseText.replace(/^\s*\/\/.*$/gm, '')
-      return JSON.parse(raw) as RuntimeConfig
+      const parsed = JSON.parse(raw) as unknown
+      // 🔴 SPA 的 try_files 兜底会把任意 404 路径回成 index.html（200 + HTML）：
+      //    JSON.parse 能过（HTML 不行）但拿到非对象 —— 必须判对象，否则拿 HTML 当配置。
+      if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
+        return parsed as RuntimeConfig
+      }
+    } catch {
+      /* 拉取/解析失败 → 试下一个候选；全败则回落默认值（本地开发无产物也能跑） */
     }
-  } catch {
-    /* 拉取/解析失败回落默认值 —— 本地开发无产物也能跑 */
   }
   return {}
 }

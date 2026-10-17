@@ -26,6 +26,7 @@
  * + 一份 `bff-whitelist.yml`。
  */
 export { createMarschatApp, readRuntimeConfig } from './createMarschatApp'
+export { runtimeConfigCandidates } from './config'
 export { createMarschatShell, SHELL_CSS } from './shell'
 export type { ShellOptions } from './shell'
 

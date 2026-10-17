@@ -6,7 +6,7 @@
 > ⚠️ **冲突裁定**：同一事实若本文与 ADR 不一致，**以反映最新线上实测的一方为准，并当场回写本文**——不要两处各说各话（历史教训：手册与 ADR 长期漂移，如用户真源表名 `user` vs `sys_user`、F1 密钥共享处数、Phase 11 待办状态）。
 >
 > **版本基线（2026-10-15 实测态；配置项与环境变量全表见 `docs/CONFIG-REFERENCE.md`）**
-> `@marschat/app-kit` **0.1.4**（装配层，Phase 13 新增；已发布 Nexus npm-hosted）｜ `@marschat/auth-components` **0.8.8**（0.8.8 = app 作用域身份只读，D-3 收口；已发布 Nexus npm-hosted）｜ `@marschat/frontend-common` 0.3.5 ｜ `com.marschat:auth-core` **2.3.0**（2.3.0 = 登录校验放行配置化 `marschat.auth.anonymous`，Phase 14 新增；2.2.0 = BFF 管理代理自动装配；已发布 Nexus maven-releases）｜ `com.marschat:common-core` 1.1.6
+> `@marschat/app-kit` **0.1.5**（装配层，Phase 13 新增；**仓库已含 0.1.5，Nexus npm-hosted 仍为 0.1.4，待下次发版** —— 0.1.5 = 修复 context-path 应用运行时配置静默失效，见坑 #41）｜ `@marschat/auth-components` **0.8.8**（0.8.8 = app 作用域身份只读，D-3 收口；已发布 Nexus npm-hosted）｜ `@marschat/frontend-common` 0.3.5 ｜ `com.marschat:auth-core` **2.3.0**（2.3.0 = 登录校验放行配置化 `marschat.auth.anonymous`，Phase 14 新增；2.2.0 = BFF 管理代理自动装配；已发布 Nexus maven-releases）｜ `com.marschat:common-core` 1.1.6
 > 6 应用（portal / activecode / kb-web / **cosmic-studio**（client-id，历史文档简写 cosmic）/ kb-ops / infra-monitor）的**登录页、SSO、统一鉴权、权限体系**全部接入。
 >
 **📚 文档地图**（本目录）
@@ -613,6 +613,8 @@ apis:                       # ⚠️ api 点任何模式都不自动授予，写
 | **38** | **Element Plus 下拉（`el-dropdown-menu`）未展开时不在 DOM，且默认 trigger 是 `hover` 不是 click** —— 自动化直接找「退出登录」按钮会 `NO-BUTTON`；补了「先点触发器」仍打不开（点击对 hover 无效） | 用 `Input.dispatchMouseEvent type=mouseMoved` **悬浮**触发（先移开再移入）；并把「按钮是否命中」单列一条断言，避免把「没点到」读成「功能坏了」 |
 | **39** | **断言子串要防「包含即通过」** —— 判据写 `'…/portal/' in url` 时，`/portal/login` 也含该子串，会「停在登录页却判 PASS」，下游断言全是假绿 | 登录态判据收紧为**三条件同时成立**：无密码框 + url 不含 `/login` + localStorage 有 token |
 | **40** | 放行清单配置化的**路径口径**：Spring MVC 拦截器与 Security 均按 context-path **剥离后**匹配；登录端点非 `/api/auth/*` 形态（如 infra `/auth/*`）保底集覆盖不到，**必须 yml 显式声明** | 误配 `context-path` 只会生成永不命中的副本（误导）；漏声明 → 登录页 401、全站登不进 |
+| **41** | **运行时配置 `app-config.json` 的基址必须按 context-path 探测，不能恒写 `/`** —— `@marschat/app-kit` 的 `readRuntimeConfig()` 现按候选顺序探测：显式 base → `pathname` 完整目录 → 首段 → `/`；**显式传 `/` 视为「未指定」**（`/` 是默认值，恒排最后） | 修复前：`/kb` `/ops` `/infra` 这类子路径应用**恒 404** ⇒ `apps-registry.yml` 派生的运行时配置**整份静默失效**（不报错，只回落内置默认），控制台长期挂一条 404（2026-10-17 三应用实测复现） |
+| **42** | **「后端已有同源权限代理」不等于「前端接上了」** —— 迁移到 app-kit 后，权限探针 issuer 由 `permissionsIssuer` 决定，删掉手写 `utils/permissions.ts` 时若漏传该字段，前端会退回直连中心 | 中心要 HS384、浏览器持 OIDC RS256 ⇒ 恒 403 ⇒ `configured=false` ⇒ **权限体系静默全放行**。infra-monitor 的 `/infra/api/auth/permissions` 代理端点就是这么被架空的（2026-10-17 实测） |
 
 ---
 
