@@ -529,8 +529,21 @@ docker logs auth-center --since 60s 2>&1 | grep -c '"level":"ERROR"'   # → 0
 
 - cluster 退化为**单节点**，冗余临时失效。node2/3 需后续用 clone/xtrabackup 从 node1 重建后归队。
 - ⚠️ **运维侧的隐性雷**：`/etc/mysql/conf.d/cluster.cnf:33` 本就写 `group_replication_start_on_boot = OFF`，
-  但运行时被**动态改成了 ON**（这正是它会不断 auto-rejoin 的原因）。本轮未在磁盘上找到改它的脚本。
-  ⇒ 排查时若发现配置与运行时不一致，**先怀疑有人/脚本在线上做过 `SET GLOBAL`**，并在收尾时把运行时改回配置值，否则容器一重启旧病重发。
+  但运行时被**动态改成了 ON**（这正是它会不断 auto-rejoin 的原因）。本轮**已定位根因并拆除**：成因是 **2026-09-07 一次脑裂救援留下的 `SET PERSIST`** —— 它把变量写进容器数据卷的 `/var/lib/mysql/mysqld-auto.cnf`，**不在 git 里**，也因此长期压过了 `cluster.cnf` 的 OFF。配合 mykng 的 `@reboot /root/scripts/docker-restart-all.sh`，**每次主机/容器重启都会重放该配置** ⇒ GR 自动起来 → 因 3932 事务分歧被踢 → 再度自锁只读，**这就是本次故障的可复发链路**。
+  ⇒ 排查时若发现「配置与运行时不一致」，**先怀疑有人做过 `SET PERSIST`**（而不是只在脑子里假定是 `SET GLOBAL`），详见下方根治动作。
+
+
+**根治动作（本轮已执行，务必照做）**：只做 `SET GLOBAL ...=OFF` **没用** —— `SET PERSIST` 会随重启复活。`cluster.cnf` 写了 OFF 却仍为 ON 时，**先查这里**：
+
+```sql
+-- ① 看有没有被持久化的变量（这张表平时是空的，容易漏看）
+SELECT * FROM performance_schema.persisted_variables;
+-- ② 有就拆掉，别只改 runtime
+RESET PERSIST IF EXISTS group_replication_start_on_boot;
+-- ③ 验证：① 应为空表；数据卷里 /var/lib/mysql/mysqld-auto.cnf 收敛为 {"Version": 2}
+```
+
+> ⚠️ **纪律**：临时救援用的 `SET PERSIST` **必须在收尾时 `RESET PERSIST` 撤销**，否则一次救火动作会变成每隔几周复发一次的定时炸弹。疑似源头为 Hermes 的 `mysql-cluster-manager` 技能（`SKILL.md:61` 第 2 步直接建议 `SET PERSIST`），建议给该技能打补丁改为会话级 `SET GLOBAL` + 收尾 `RESET PERSIST`（跨仓，本轮未改，见 `STATUS.md` T-ENG-13）。
 
 ### 10.6 排查心法
 
