@@ -552,3 +552,157 @@ RESET PERSIST IF EXISTS group_replication_start_on_boot;
 这类故障的迷惑性在于：**读路径全好**（IdP 页面能开、口令校验能过），只有**写路径**坏导致 SSO 换码失败；
 而 UI 又把底层异常压成一句 Whitelabel。按 `trace_terminal` 铁律追到最末端节点只需一条 SQL，
 比去翻组件代码便宜两个数量级。
+
+
+---
+
+## 11. 从「单节点」恢复为「三节点」（2026-10-19 实战路径）
+
+> 承接 §10。§10 解决的是「先让服务活过来」，本节解决的是「把冗余装回去」。
+> ⚠️ 这两件事可以同时成立：服务正常 ≠ 有冗余。
+
+### 11.1 动手前必须确认的 4 件事（跳一条都可能毁数据）
+
+1. **数据方向**：哪个节点是超集？用 `SELECT @@gtid_executed` 逐节点比对。
+   ⚠️ **GTID 必须是严格包含关系**才能单向 clone。若两边各自有新事务（**双向分歧**），
+   直接 clone 会丢掉一边的写入 —— 那种情况要先抢救，本节路径不适用。
+2. **有没有应用是「多地址随机 LB」**：本轮最大的雷 —— `activecode` 的 JDBC 是
+   `jdbc:mysql://<三个地址>/tools?loadBalanceStrategy=random`，
+   它会在任意节点上写入。既然如此，**孤立节点也可能在接收写入**。
+   ⇒ 重建前必须逐表比对行数，确认它没有写到落后节点上。
+   本轮证据：node2/3 GTID 未增长、`tools` 库 6 表行数与 node1 逐表一致（390/36/44/3/5/18）
+   ⇒ **排除双向分歧，单向分歧成立**，本节路径才可用。
+3. **clone 插件与版本**：源与目标都须 `clone` 插件 ACTIVE 且 **版本号完全一致**。
+4. **目标主机磁盘**：见 §11.3，这是本轮唯一导致两次失败的真实原因。
+
+### 11.2 执行顺序（串行，不可并行 —— 并行会让组丢 quorum）
+
+```sql
+-- ① 目标节点上：先解锁（当过 SECONDARY 的节点会残留 super_read_only=ON，clone 会被 1290 挡住）
+SET GLOBAL super_read_only = OFF;
+SET GLOBAL read_only = OFF;
+
+-- ② 拆掉旧组（在待重建的节点上）
+STOP GROUP_REPLICATION;
+
+-- ③ 数据源节点上：bootstrap 建立新组
+SET GLOBAL group_replication_bootstrap_group = ON;
+START GROUP_REPLICATION;
+SET GLOBAL group_replication_bootstrap_group = OFF;   -- 🔴 必须紧跟关掉，漏关会导致下次重启重复 bootstrap
+```
+
+```sql
+-- ④ 在目标节点上 clone（方向永远是 FROM 数据源）
+SET GLOBAL clone_valid_donor_list = '<数据源IP>:<端口>';
+CLONE INSTANCE FROM 'root'@'<数据源IP>':<端口> IDENTIFIED BY '<密码>';
+```
+
+🔴 **clone 完成后目标实例会自动重启，容器会跟着退出** —— 官方 mysql 镜像的 entrypoint 是脚本、
+mysqld **不是 PID 1** ⇒ 必须 `docker start` 把它拉回来。
+本轮真实报错：`ERROR 3707 Restart server failed (mysqld is not managed by supervisor)` ——
+**此时数据其实已经拷完了**，不要误判成失败去重试。
+
+```sql
+-- ⑤ 容器起来后入组
+START GROUP_REPLICATION;
+```
+
+⚠️ **必须先 `docker start` 并确认容器 Up，再 `START GROUP_REPLICATION`**。
+
+### 11.3 磁盘：本轮唯一让 clone 两次失败的原因
+
+```bash
+# 失败长这样
+ERROR 1006 (HY000): Can't create database '(null)' (errno: 28 - No space left on device)
+```
+
+🔴 **清理被日志占满的空间时，必须 `truncate`，绝对不能 `rm`**：
+```bash
+: > /path/to/huge.log            # ✅ 立即释放（变稀疏文件）
+rm -f /path/to/huge.log          # ❌ 空间不释放！进程还持有 fd
+```
+判定方法：截断后 **`ls -l` 看大小不变，但 `df` 已释放** —— 这是稀疏文件的正常表现，
+**看 `df` 不要看 `ls`**。
+
+本轮元凶：**`hive-metastore` 的 Compactor Initiator 线程死循环**。
+它以 **34.7 MB/s 的峰值**往 `/home/root01/hive-compose/logs/hive.log` 里灌，
+把 104G 盘吃到 100% 满 ⇒ 直接导致 node2/node3 的 clone 两次失败。
+**这是根因，不是环境噪音** —— 集群分裂只是它引发的症状之一。
+
+**日志洪水长这样**（在 hive-metastore 容器日志里）：
+```
+HikariPool-1 - Connection is closed        ← 连不上 metastore 库，Initiator 每轮都重新撞墙
+CompactorThread ... slowdown
+loop took 1792366783 seconds               ← 关键指征：循环耗时被算成天文数字
+```
+
+**根治动作（一行，立竿见影）**：
+```bash
+docker restart hive-metastore          # 重连 metastore 库，Initiator 死循环自然终止
+```
+
+🔴 **为什么是 restart 而不是直接 truncate 了事**：truncate 只清盘、不清根因 ——
+日志会以同样速度涨回来（本轮实测：截断出的 7.6G 只够撑 3.5 分钟）。
+restart 顺带**恢复** hive 功能，不是停服避险。
+
+**实测效果（原始字节数，重启前 vs 重启后）**：
+
+| 时点 | 增长 |
+|---|---|
+| 重启前 | **1,040,194,581 B / 30 秒**（≈ **34.7 MB/s**） |
+| 重启后 90 秒 | **403 B / 30 秒** |
+| 重启后再复核 | **3,935 B / 120 秒**（≈ **33 B/s**） |
+
+⇒ 降幅约 **1/258 万**，日志洪水消失。
+
+**判定方法（重启后必须实测，别看容器 Up 就收工）**：
+```bash
+S1=$(stat -c%s /home/root01/hive-compose/logs/hive.log); sleep 30
+S2=$(stat -c%s /home/root01/hive-compose/logs/hive.log); echo $((S2-S1))
+```
+- < 1 MB / 30 秒 ⇒ ✅ 根因已除
+- > 100 MB / 30 秒 ⇒ ❌ 重启无效，去查 metastore 库本身的连通性与凭据
+
+⚠️ **测增长率前必须先停掉任何 truncate 兜底循环**，否则测出来的是被反复截断的假数据。
+
+**顺带提醒（别被 `ls` 吓到）**：截断过的 `hive.log` 是**稀疏文件**，
+本轮 `ls` 显示 **33.7 GB**，但 `df` 显示磁盘稳定在 **7.3G 可用 / 93%** —— **看 `df` 不要看 `ls`**。
+想让它表观大小也恢复正常，得靠 logrotate 轮转重建，不是再 truncate 一次。**本轮未做，留待 logrotate 接入时一并处理**（见 `STATUS.md` T-ENG-15）。
+
+### 11.4 别忘了：`-start_on_boot` 的分节点差异
+
+本轮恢复完发现三节点 `@@group_replication_start_on_boot` **不一致**（node1=0，node2/3=1）：
+
+| 节点 | 配置文件（共享盘） | 实际挂载 | 运行时 |
+|---|---|---|---|
+| node1 | `cluster.cnf` 写 **OFF** | bind mount 共享盘 | 0 |
+| node2/3 | `node2.cnf`/`node3.cnf` 写 **OFF** | **182 本地 my.cnf**（缺该项） | **1**（MySQL 默认值） |
+
+⇒ **共享盘真源对 node2/3 根本没生效**（配置漂移，见 `STATUS.md` T-ENG-14）。
+
+⚠️ **为什么必须统一为 ON**：node1 是所有应用连接的节点。若它重启后不自动入组，
+就会变成「孤立但可写」的状态 ⇒ 静默产生分歧 ⇒ 复现 §10 的故障链。
+本轮已把 `cluster.cnf:33` 改为 `ON`（备份 `cluster.cnf.bak-20261019-074042`）。
+
+**改配置的三个禁止项**：
+- ❌ 不要 `SET PERSIST`（会写进 `mysqld-auto.cnf`，优先级压过 cnf，正是 §10 那颗雷的成因）
+- ❌ 不要只 `SET GLOBAL`（重启后会被配置文件覆盖，等于没改）
+- ✅ 改**配置文件**，不重启就不影响现网，下次重启自然生效
+
+### 11.5 本轮踩到的其它真实报错
+
+| 报错 | 真因 | 处置 |
+|---|---|---|
+| `ERROR 1290 --super-read-only` | 当过 SECONDARY 的节点退组后仍残留只读 | clone 前先解锁 |
+| `ERROR 3707 ... not managed by supervisor` | 官方镜像 mysqld 非 PID 1 | 数据已拷完，`docker start` 拉回即可 |
+| `ERROR 1006 errno 28` | 磁盘满（真因是 hive 日志洪水） | `truncate` 腾空间 + `docker restart hive-metastore` 断根 |
+| `Connection is closed` + `loop took 1792366783 seconds` | hive Compactor Initiator 死循环 | `docker restart hive-metastore` |
+
+### 11.6 🔴 排障心法：三节点全 PRIMARY 不是异常
+
+配置真源 `/mnt/shared/platform/mysql/cluster.cnf` 第 29 行明写「Group Replication 多主模式」
+（`single_primary_mode=OFF` + `enforce_update_everywhere_checks=ON`）。
+
+⇒ **本集群是故意的多主**，三个节点都显示 `PRIMARY` **是正确的**。
+拿「1 PRIMARY + 2 SECONDARY」的直觉去判，会把正常状态误判成故障。
+**排障前先确认集群是单主还是多主**（`SELECT @@group_replication_single_primary_mode`）。
