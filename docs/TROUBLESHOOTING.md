@@ -17,6 +17,9 @@
 再有就是「数据/配置」与「授权」→ §4
 无论哪类，动手前先跑 §5 取证命令集拿事实，不要凭印象
 ```
+> 🔴 **先看这句**：若「多个应用同时炸」且「IdP 页面能开、口令能过但换码 500」、
+>  或有 `(1290 …read-only…)` 字样 —— **去 §10，10 秒查 `@@super_read_only` 即可定性**，
+>  不要在组件代码里找根因（2026-10-18 六应用 SSO 全线 500 的翻车记录）。
 
 **三条铁律前置**：
 1. **区分「没生效」与「没部署」** —— 先看线上产物，再看代码（坑 #24）。
@@ -449,3 +452,90 @@ private final ThreadLocal<JWTSigner> signerHolder =
 配套两条：
 - **对照实验优先**（纯读 vs 混读写）——两组只差一个变量，结论才硬。
 - **先量后判**：这次是先有 `5/60` 这个可复现的数字，才敢动 `ThreadLocal`；没有数字时宁可登记「未证实」（就像当年 §8.6 做的那样），也不要猜。
+
+---
+
+## 10. 🔴 P0 环境故障：MySQL GR 数据分歧 → 被自动拉起 super_read_only → 六应用 SSO 全线 500
+
+> 2026-10-18 夜实测定位并修复。**症状极具迷惑性：表现是「认证组件全崩」，根因却在数据库集群，与组件代码无关。**
+
+### 10.1 症状
+
+浏览器 IdP 登录页能打开、**口令能提交成功**，但换授权码时 **500 / Whitelabel Error Page**；cosmic 报错更直白：
+`(1290, 'The MySQL server is running with the --read-only option so it cannot execute this...')`。
+
+### 10.2 定位三步（按顺序，别跳）
+
+```bash
+# ① 先看是不是只读（10 秒定性）
+docker exec platform-mysql-1 mysql -uroot -p"$MYSQL_ROOT_PASSWORD" \
+  -e "SELECT @@read_only, @@super_read_only;"
+# → 1  1  即为本节
+
+# ② 看集群成员状态 —— 这一步决定后续能不能随便关只读
+docker exec platform-mysql-1 mysql -uroot -p"$MYSQL_ROOT_PASSWORD" --table -e \
+  "SELECT MEMBER_HOST, MEMBER_PORT, MEMBER_STATE, MEMBER_ROLE
+   FROM performance_schema.replication_group_members;"
+# → MEMBER_STATE=ERROR（不是 PRIMARY/SECONDARY）才是本节；若是 SECONDARY 说明主库切走了，另案处理
+
+# ③ 看 GR 日志确认根因
+docker logs platform-mysql-1 --since 24h 2>&1 | grep -E "MY-011526|MY-011522|MY-011565"
+```
+
+本轮日志铁证：
+```
+[ERROR] [MY-011526] 'This member has more executed transactions than those present in the group.
+         Local transactions: …aaaaaaaa-…:1-119190:… > Group transactions: …:1-115258:…'
+[ERROR] [MY-011522] 'The member contains transactions not present in the group.
+         The member will now exit the group.'
+[System] [MY-011373] 'Started auto-rejoin procedure attempt 3 of 3'
+[System] [MY-011375] 'Auto-rejoin procedure attempt 3 of 3 finished. Member was not able to join the group.'
+[System] [MY-011565] 'Setting super_read_only=ON.'          ← 元凶在这里
+```
+
+⇒ **不是磁盘满、不是配置 write(=ON)，是 GR 自己把 super_read_only 拉起来的。**
+
+### 10.3 根因
+
+node1（`192.168.31.105:3306`）相对另两节点（`192.168.31.182:3307/3308`）**多出 3932 个事务**。
+GR 认证器拒绝有额外事务的成员入组，auto-rejoin 三次全败后**自动 `super_read_only=ON`**，写量全站拒接。
+
+### 10.4 处置（本轮采用，零数据丢失）
+
+```sql
+-- ⚠️ 三个前提，缺一不可：
+--   ① 已确认 MEMBER_STATE=ERROR（非 SECONDARY）
+--   ② 已确认本节点 GTID 是集群的**超集**（多出来的是真实业务数据）
+--   ③ **绝不 bootstrap** —— bootstrap 会造出第二个同名组，导致二次分歧
+STOP GROUP_REPLICATION;
+SET GLOBAL super_read_only = OFF;
+SET GLOBAL read_only = OFF;
+SET GLOBAL group_replication_start_on_boot = OFF;   -- 防容器重启后再次自动尝试入组被锁
+```
+
+**为什么用退组而不是 bootstrap**：该节点 GTID 是集群超集，退组可直接救活可用性且不丢数据；
+bootstrap 会生成组的另一个独立副本，后面两节点归队时谁的数据先进说不清，是雷。
+
+**验证必须看「写」不看「读」** —— `/auth/login` 返回 200 也不算通过（读过 + 验签都能通）：
+```bash
+# 唯一的硬判据：refresh_token 表能否 INSERT（它正是本轮失败点）
+curl -s -X POST http://127.0.0.1:8085/auth/login -H 'Content-Type: application/json' \
+  -d '{"username":"…","password":"…"}' | python3 -c "import sys,json;d=json.load(sys.stdin);print(d['code'], bool(d['data'].get('refreshToken')))"
+# → 200 True 才算真恢复
+docker logs auth-center --since 60s 2>&1 | grep -c '"level":"ERROR"'   # → 0
+```
+
+### 10.5 代价与遗留（🔴 待良哥择机处理）
+
+- cluster 退化为**单节点**，冗余临时失效。node2/3 需后续用 clone/xtrabackup 从 node1 重建后归队。
+- ⚠️ **运维侧的隐性雷**：`/etc/mysql/conf.d/cluster.cnf:33` 本就写 `group_replication_start_on_boot = OFF`，
+  但运行时被**动态改成了 ON**（这正是它会不断 auto-rejoin 的原因）。本轮未在磁盘上找到改它的脚本。
+  ⇒ 排查时若发现配置与运行时不一致，**先怀疑有人/脚本在线上做过 `SET GLOBAL`**，并在收尾时把运行时改回配置值，否则容器一重启旧病重发。
+
+### 10.6 排查心法
+
+> **看到「全平台认证 500」不要先怀疑认证组件 —— 先花 10 秒查一下数据库是不是只读。**
+
+这类故障的迷惑性在于：**读路径全好**（IdP 页面能开、口令校验能过），只有**写路径**坏导致 SSO 换码失败；
+而 UI 又把底层异常压成一句 Whitelabel。按 `trace_terminal` 铁律追到最末端节点只需一条 SQL，
+比去翻组件代码便宜两个数量级。

@@ -6,7 +6,7 @@
 > ⚠️ **冲突裁定**：同一事实若本文与 ADR 不一致，**以反映最新线上实测的一方为准，并当场回写本文**——不要两处各说各话（历史教训：手册与 ADR 长期漂移，如用户真源表名 `user` vs `sys_user`、F1 密钥共享处数、Phase 11 待办状态）。
 >
 > **版本基线（2026-10-15 实测态；配置项与环境变量全表见 `docs/CONFIG-REFERENCE.md`）**
-> `@marschat/app-kit` **0.1.6**（装配层，Phase 13 新增；**仓库已含 0.1.6，Nexus npm-hosted 仍为 0.1.4，待发版** —— 0.1.5 = 修复 context-path 应用运行时配置静默失效，见坑 #41；**0.1.6 = 权限查询基址缺省不再回落跨域 IdP**，见坑 #42 / `STATUS.md` T-ENG-11·T-ENG-12）｜ `@marschat/auth-components` **0.8.8**（0.8.8 = app 作用域身份只读，D-3 收口；已发布 Nexus npm-hosted）｜ `@marschat/frontend-common` 0.3.5 ｜ `com.marschat:auth-core` **2.3.0**（2.3.0 = 登录校验放行配置化 `marschat.auth.anonymous`，Phase 14 新增；2.2.0 = BFF 管理代理自动装配；已发布 Nexus maven-releases）｜ `com.marschat:common-core` 1.1.6
+> `@marschat/app-kit` **0.1.6**（装配层，Phase 13 新增；**仓库已含 0.1.6**；**Nexus npm-hosted `latest` 实测已为 0.1.6**（0.1.5 = 2026-10-17 22:41 发布，0.1.6 = 2026-10-18 23:15 发布，tarball 内已含 `resolvePermissionsIssuer`，确认真产物）**—— 但各应用 `package.json` 仍钉旧版且锁文件未更新 ⇒ 线上产物仍是旧包，两轮修复落地在**生产**前须各应用升版本号走流水线** —— 0.1.5 = 修复 context-path 应用运行时配置静默失效，见坑 #41；**0.1.6 = 权限查询基址缺省不再回落跨域 IdP**，见坑 #42 / `STATUS.md` T-ENG-11·T-ENG-12）｜ `@marschat/auth-components` **0.8.8**（0.8.8 = app 作用域身份只读，D-3 收口；已发布 Nexus npm-hosted）｜ `@marschat/frontend-common` 0.3.5 ｜ `com.marschat:auth-core` **2.3.0**（2.3.0 = 登录校验放行配置化 `marschat.auth.anonymous`，Phase 14 新增；2.2.0 = BFF 管理代理自动装配；已发布 Nexus maven-releases）｜ `com.marschat:common-core` 1.1.6
 > 6 应用（portal / activecode / kb-web / **cosmic-studio**（client-id，历史文档简写 cosmic）/ kb-ops / infra-monitor）的**登录页、SSO、统一鉴权、权限体系**全部接入。
 >
 **📚 文档地图**（本目录）
