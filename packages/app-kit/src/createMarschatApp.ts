@@ -42,6 +42,7 @@ import { createRequest, createAuthGuard, type TokenStore } from '@marschat/front
 import { createMarschatShell, type ShellOptions } from './shell'
 import {
   resolveAppConfig,
+  resolvePermissionsIssuer,
   runtimeConfigCandidates,
   toRouterPath,
   type ResolvedAppConfig,
@@ -170,13 +171,16 @@ export function createMarschatApp(options: MarschatAppOptions): MarschatApp {
   })
 
   // ⑤ 权限选项（三层同源：菜单 / 路由守卫 / PermissionGate 共用同一份状态）
-  //    🔴 issuer 走 `permissionsIssuer ?? config.issuer`：
-  //       门户类应用（portal / cosmic-studio）的权限查询必须走**自家后端 BFF 代理**（同源），
-  //       直连 auth-center 会 401 → fail-open → 权限体系静默全放行且不报错。
+  //    🔴 issuer 走 `resolvePermissionsIssuer(...)`：
+  //       **缺省不可再回落 IdP**。中心的 `/auth/permissions` 校验 HS384 业务令牌，
+  //       浏览器只有 OIDC RS256 access_token ⇒ 恒 403，还常被 CORS 拦成 `Failed to fetch`
+  //       （kb-web 2026-10-17 实测）⇒ `configured=false` ⇒ 权限体系 **fail-open 全放行且不报错**。
+  //       portal / kb-web / infra / cosmic 四家后端的同源代理 `${authApiBase}/permissions`
+  //       实测 200 + configured=true，因此缺省指向同源代理才是正解（详见该函数注释）。
   //       注意这里**只**改权限基址；上面 ③ 的 ssoConfig.issuer 仍指向中心，
   //       否则 SSO 免登与 SLO 联动会静默失效。
   const permissions = {
-    issuer: options.permissionsIssuer ?? config.issuer,
+    issuer: resolvePermissionsIssuer(options.permissionsIssuer, config, origin),
     clientId: config.clientId,
     getToken: () => getToken(),
     adminBypass: options.adminBypass ?? true,

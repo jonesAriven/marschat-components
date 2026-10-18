@@ -6,7 +6,7 @@
 > ⚠️ **冲突裁定**：同一事实若本文与 ADR 不一致，**以反映最新线上实测的一方为准，并当场回写本文**——不要两处各说各话（历史教训：手册与 ADR 长期漂移，如用户真源表名 `user` vs `sys_user`、F1 密钥共享处数、Phase 11 待办状态）。
 >
 > **版本基线（2026-10-15 实测态；配置项与环境变量全表见 `docs/CONFIG-REFERENCE.md`）**
-> `@marschat/app-kit` **0.1.5**（装配层，Phase 13 新增；**仓库已含 0.1.5，Nexus npm-hosted 仍为 0.1.4，待下次发版** —— 0.1.5 = 修复 context-path 应用运行时配置静默失效，见坑 #41）｜ `@marschat/auth-components` **0.8.8**（0.8.8 = app 作用域身份只读，D-3 收口；已发布 Nexus npm-hosted）｜ `@marschat/frontend-common` 0.3.5 ｜ `com.marschat:auth-core` **2.3.0**（2.3.0 = 登录校验放行配置化 `marschat.auth.anonymous`，Phase 14 新增；2.2.0 = BFF 管理代理自动装配；已发布 Nexus maven-releases）｜ `com.marschat:common-core` 1.1.6
+> `@marschat/app-kit` **0.1.6**（装配层，Phase 13 新增；**仓库已含 0.1.6，Nexus npm-hosted 仍为 0.1.4，待发版** —— 0.1.5 = 修复 context-path 应用运行时配置静默失效，见坑 #41；**0.1.6 = 权限查询基址缺省不再回落跨域 IdP**，见坑 #42 / `STATUS.md` T-ENG-11·T-ENG-12）｜ `@marschat/auth-components` **0.8.8**（0.8.8 = app 作用域身份只读，D-3 收口；已发布 Nexus npm-hosted）｜ `@marschat/frontend-common` 0.3.5 ｜ `com.marschat:auth-core` **2.3.0**（2.3.0 = 登录校验放行配置化 `marschat.auth.anonymous`，Phase 14 新增；2.2.0 = BFF 管理代理自动装配；已发布 Nexus maven-releases）｜ `com.marschat:common-core` 1.1.6
 > 6 应用（portal / activecode / kb-web / **cosmic-studio**（client-id，历史文档简写 cosmic）/ kb-ops / infra-monitor）的**登录页、SSO、统一鉴权、权限体系**全部接入。
 >
 **📚 文档地图**（本目录）
@@ -274,8 +274,11 @@ export const marschat = createMarschatApp({
                                  // 公共包改默认值时 vue-tsc 零报错 → 静默跳 404 空页
   watchSession: () => isOidcToken(),  // 双模应用（账密+SSO 并存）必须用函数式判据
   tokenKeys: { accessTokenKey: '<本应用真实键>' },  // 键名非 <prefix>access_token 形态时必填
-  permissionsIssuer: '/<ctx>/api',     // 权限走自家 BFF 代理；不设 → 直连中心 401 →
-                                       // configured=false → 权限静默全放行
+  permissionsIssuer: '/<ctx>/api',     // 权限走自家 BFF 代理（0.1.6 起可不传，缺省已自动指向同源
+                                       // apiBase —— 注意是 apiBase 不是 authApiBase：内部还要拼
+                                       // /auth/permissions，写 authApiBase 会拼成 …/auth/auth/… 404）
+                                       // 0.1.5 及更早不设 → 直连中心 → Failed to fetch / 401 →
+                                       // configured=false → 权限静默全放行（坑 #42）
 })
 ```
 ```ts
@@ -614,7 +617,7 @@ apis:                       # ⚠️ api 点任何模式都不自动授予，写
 | **39** | **断言子串要防「包含即通过」** —— 判据写 `'…/portal/' in url` 时，`/portal/login` 也含该子串，会「停在登录页却判 PASS」，下游断言全是假绿 | 登录态判据收紧为**三条件同时成立**：无密码框 + url 不含 `/login` + localStorage 有 token |
 | **40** | 放行清单配置化的**路径口径**：Spring MVC 拦截器与 Security 均按 context-path **剥离后**匹配；登录端点非 `/api/auth/*` 形态（如 infra `/auth/*`）保底集覆盖不到，**必须 yml 显式声明** | 误配 `context-path` 只会生成永不命中的副本（误导）；漏声明 → 登录页 401、全站登不进 |
 | **41** | **运行时配置 `app-config.json` 的基址必须按 context-path 探测，不能恒写 `/`** —— `@marschat/app-kit` 的 `readRuntimeConfig()` 现按候选顺序探测：显式 base → `pathname` 完整目录 → 首段 → `/`；**显式传 `/` 视为「未指定」**（`/` 是默认值，恒排最后） | 修复前：`/kb` `/ops` `/infra` 这类子路径应用**恒 404** ⇒ `apps-registry.yml` 派生的运行时配置**整份静默失效**（不报错，只回落内置默认），控制台长期挂一条 404（2026-10-17 三应用实测复现） |
-| **42** | **「后端已有同源权限代理」不等于「前端接上了」** —— 迁移到 app-kit 后，权限探针 issuer 由 `permissionsIssuer` 决定，删掉手写 `utils/permissions.ts` 时若漏传该字段，前端会退回直连中心 | 中心要 HS384、浏览器持 OIDC RS256 ⇒ 恒 403 ⇒ `configured=false` ⇒ **权限体系静默全放行**。infra-monitor 的 `/infra/api/auth/permissions` 代理端点就是这么被架空的（2026-10-17 实测） |
+| **42** | **「后端已有同源权限代理」不等于「前端接上了」** —— 迁移到 app-kit 后，权限探针 issuer 由 `permissionsIssuer` 决定，删掉手写 `utils/permissions.ts` 时若漏传该字段，前端会退回直连中心 | 中心要 HS384、浏览器持 OIDC RS256 ⇒ 页面 `fetch` 直接 `Failed to fetch`（连 403 都拿不到）⇒ `configured=false` ⇒ **权限体系静默全放行且零报错**。2026-10-17 夜实测覆盖面为 **kb-web / kb-ops / infra 三个应用**，其中 kb-web 与 infra 的后端代理**早已可用**（`${authApiBase}/permissions` = 200 + `configured:true`），纯属前端没指过去。**✅ 0.1.6 起组件侧收口**：新增 `resolvePermissionsIssuer()`，**缺省不再回落跨域 IdP**——优先级 = 显式 `permissionsIssuer` >（IdP 同源时的 `issuer`）> 同源代理 **`apiBase`**（不是 `authApiBase`：内部还要拼 `/auth/permissions`）> 兜底 `issuer`。升到 0.1.6 的应用即便不传该字段也会自动走同源代理（旧版必须逐应用补一行）。**反向警示不变**：绝不能反向把 BFF 基址塞进 `issuer`，否则 SSO 免登与 SLO 联动全部静默失效 |
 
 ---
 

@@ -297,6 +297,69 @@ export function resolveAppConfig(
   }
 }
 
+/** 取 URL 的 origin（`http(s)://host[:port]`）；非法输入返回空串。 */
+function originOf(url: string): string {
+  try {
+    return new URL(url).origin
+  } catch {
+    return ''
+  }
+}
+
+/** 去掉结尾冗余斜杠并去空白。 */
+function trimSlash(raw: string): string {
+  return (raw || '').trim().replace(/\/+$/, '')
+}
+
+/**
+ * **权限查询基址**（`fetchPermissions` 的 issuer）。
+ *
+ * ⚠️ **拼装口径（务必先看这行）**：`auth-components` 内部请求的是
+ * `` `${issuer}/auth/permissions?client=<clientId>` ``（见 `usePermissions.ts`），
+ * 即本函数返回值**必须是不含 `/auth` 的那一级**。实测四家可用代理：
+ * `/portal/api`、`/kb/api`、`/infra/api`、`/api` ⇒ 都等于 **`apiBase`**，不是 `authApiBase`。
+ * （若误用 `authApiBase` 会拼出 `/kb/api/auth/auth/permissions` ⇒ 404 ⇒ 同样 fail-open。）
+ *
+ * 🔴 **历史缺陷（STATUS T-ENG-11 / 坑 #42；2026-10-17 真浏览器实测复核）**：
+ * 旧实现是 `permissionsIssuer ?? config.issuer`，即缺省把权限查询发到 **IdP 自身**
+ * （`https://auth.marschat.online`）。而中心的 `/auth/permissions` **不是浏览器可直连端点**：
+ *   - 它校验 **HS384 业务令牌**，浏览器持有的是 **OIDC RS256 access_token** ⇒ 恒 403；
+ *   - 即便拿到 403，跨域响应也常被 CORS 拦成 JS 侧的 `Failed to fetch`（kb-web 实测即如此）。
+ * 结果是 `fetchPermissions` **恒失败** ⇒ `configured=false` ⇒ 权限体系 **fail-open 全放行**
+ * （菜单全出、按钮全可点），**且控制台没有任何可归因报错**——这是最危险的失效形态。
+ *
+ * 而 portal / kb-web / infra / cosmic **四家后端的同源代理早已就绪**：
+ * `${apiBase}/auth/permissions` 实测返回 200 + `configured=true` + 权限点数组。
+ * 因此**缺省必须是同源代理**，不是 IdP。
+ *
+ * 优先级：
+ *   1. 显式 `permissionsIssuer`（永远最高优先，保持老写法可覆盖）
+ *   2. IdP `issuer` 与本站点**同源**时 → 仍用 `issuer`（自建 IdP 直供权限点的场景）
+ *   3. 同源代理 `apiBase`
+ *   4. 兜底 `issuer`（无 apiBase 时才走到，正常不存在）
+ *
+ * ⚠️ 与 `issuer` 的边界：`issuer` 同时被 `ssoConfig.issuer` 消费（OIDC 发现 / 换票 / 会话探针），
+ * 改它会让 SSO 免登与 SLO 联动**静默失效**。本函数只影响权限查询，二者不可混为一谈。
+ */
+export function resolvePermissionsIssuer(
+  permissionsIssuer: string | undefined,
+  config: Pick<ResolvedAppConfig, 'issuer' | 'apiBase'>,
+  origin = 'http://localhost',
+): string {
+  if (permissionsIssuer && permissionsIssuer.trim()) {
+    return trimSlash(permissionsIssuer)
+  }
+  const issuer = trimSlash(config.issuer)
+  const siteOrigin = originOf(origin) || trimSlash(origin)
+  const idpOrigin = originOf(issuer)
+  // 自建 IdP 与站点同源（如 IdP 由本应用自身代理暴露）→ 直连无跨域问题，保持旧行为
+  if (idpOrigin && siteOrigin && idpOrigin === siteOrigin) {
+    return issuer
+  }
+  const proxy = trimSlash(config.apiBase)
+  return proxy || issuer
+}
+
 /** 站内绝对路径（带部署前缀），用于跨页跳转与 SLO 回跳。 */
 export function appUrl(config: Pick<ResolvedAppConfig, 'contextPath'>, path: string, origin = ''): string {
   const base = baseFragment(config.contextPath)

@@ -241,7 +241,7 @@ rules:
 
 ---
 
-### 5.2 `@marschat/app-kit` 装配层字段（前端 · Phase 13 · 0.1.3~0.1.4）
+### 5.2 `@marschat/app-kit` 装配层字段（前端 · Phase 13 · 0.1.3~0.1.6）
 
 > 这些**不是环境变量**，而是传给 `createMarschatApp()` 的声明式选项，集中在各应用的
 > `src/config/runtime.ts`（或 `config.js`）。**唯一需要手写的接入代码就是这一段声明。**
@@ -264,7 +264,7 @@ rules:
 | `homePath` | `string` | `'/dashboard'` | 🔴 **必须显式传**。守卫 `onDeny` 消费它（`router.replace(config.homePath)`）；类型是 `string` **非字面量联合** ⇒ 公共包改默认值时 `vue-tsc` **零报错**，缺省会静默跳到路由表里不存在的路径（404 空页）。判据：**该应用路由表里到底有没有那个路由**（kb-web/kb-ops 有；cosmic/portal **没有** ⇒ 必须传 `'/'`） |
 | `tokenKeyPrefix` | `string` | 由 `appId` 派生 | 前缀派生四件套（`kb_` ⇒ `kb_access_token` 等）。⚠️ 派生值不等于历史键时**登录态会消失** |
 | 🔴 `tokenKeys` | `Partial<TokenKeys>` | — | **0.1.3 新增**。**逐字段 `??` 覆盖**前缀派生值，用于非标准键名（portal的 `portal_token`、cosmic 的 `token`）。⚠️ 实现用 `??` 不是 `||`（空串不应回落派生值）；**漏传的键保留派生值**，不会变 `undefined` |
-| 🔴 `permissionsIssuer` | `string` | `config.issuer` | **0.1.3 新增**。权限查询走**自家 BFF 代理**（同源）而非直连中心。⚠️ **不要**图省事把它设成 `issuer` —— `issuer` 同时被 SSO 客户端消费，改了会让静默免登与 SLO 全部失效。**不设的后果**：直连中心 401 ⇒ `configured=false` ⇒ **权限静默全放行** |
+| 🔴 `permissionsIssuer` | `string` | **0.1.6 起：`apiBase`**（0.1.5 及更早是 `config.issuer`，见下方说明） | **0.1.3 新增**。权限查询走**自家 BFF 代理**（同源）而非直连中心。⚠️ **不要**图省事把它设成 `issuer` —— `issuer` 同时被 SSO 客户端消费，改了会让静默免登与 SLO 全部失效。**不设的后果（旧版）**：直连中心 ⇒ `Failed to fetch` / 403 ⇒ `configured=false` ⇒ **权限静默全放行**。<br>🔴 **0.1.6 变更**：缺省改为 `resolvePermissionsIssuer()` 派生 —— 显式值最优先；IdP `issuer` 与本站点**同源**时保留 `issuer`；否则取同源代理 **`apiBase`**；无 `apiBase` 才兜底 `issuer`。**升级 0.1.6 后即使不传本字段也会自动走同源代理**，kb-web / kb-ops / infra 这类漏传的应用随之修复。⚠️ **是 `apiBase` 不是 `authApiBase`** —— `fetchPermissions` 内部还会拼 `/auth/permissions`，传 `authApiBase` 会变成 `/…/auth/auth/permissions`（404 ⇒ 同样 fail-open） |
 | `sessionMode` | `'oidc' \| 'bff'` | `'oidc'` | 应用级会话形态常量 |
 | 🔴 `watchSession` | `boolean \| (() => boolean)` | `true` | **0.1.4 起支持函数**。**双模应用**（账密 `legacy` + SSO `oidc` 并存）传`() => isOidcToken()` 才是正解 —— 判据从「应用启动时快照」变成「每次求值」。⚠️ 布尔 `true` **越不过** `sessionMode` 闸门（BFF 应用传 true 会被3 秒误踢，2026-09-15 事故）。⚠️ portal 这类「HS256 自签 + 自管监视器四项」形态**不适用**函数式，仍需自管 |
 | 🔴 `clearExtraAuth` | `() => void` | — | **0.1.4 新增**。清理应用**自管键**（portal 的 `portal_user`/`portal_role`/`portal_auth_uid`）。接入**全部三条清理路径**（401 / 会话丢失 / 登出）⇒ **必须幂等**。⚠️ 不写的后果：`portal_role` 残留 ⇒ **未认证即可见管理员入口**（权限信息泄漏） |

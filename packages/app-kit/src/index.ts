@@ -32,6 +32,7 @@ export type { ShellOptions } from './shell'
 
 export {
   resolveAppConfig,
+  resolvePermissionsIssuer,
   normalizeContextPath,
   baseFragment,
   deriveTokenKeys,

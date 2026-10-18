@@ -14,6 +14,7 @@ import {
   appUrl,
   toRouterPath,
   runtimeConfigCandidates,
+  resolvePermissionsIssuer,
   DEFAULT_WHITE_LIST_PATHS,
 } from '../src/config.ts'
 
@@ -253,6 +254,35 @@ console.log('\n[12] 运行时配置探测候选 —— context-path 应用不再
   // 🔴 去重铁律：显式值与推导值相同时不得重复请求（否则 context-path 应用每次多一次 404）
   eq(runtimeConfigCandidates('/ops', '/ops/dashboard'), ['/ops/', '/'],
      '显式与推导同源 → 去重，不产生重复请求')
+}
+
+console.log('\n[13] 权限查询基址缺省 —— 不再回落到跨域 IdP（STATUS T-ENG-11，2026-10-17 浏览器实测缺陷）')
+{
+  // ⚠️ 拼装口径：auth-components 内部请求 `${issuer}/auth/permissions`，故本值必须**不含 /auth**
+  const idp = { issuer: 'https://auth.marschat.online', apiBase: '/kb/api' }
+  eq(resolvePermissionsIssuer(undefined, idp, 'https://kb.marschat.online'), '/kb/api',
+     '🔴 未显式指定 → 同源代理（旧实现回落 IdP ⇒ CORS/403 ⇒ fail-open 全放行）')
+  eq(resolvePermissionsIssuer(undefined, idp, 'https://kb.marschat.online') + '/auth/permissions',
+     '/kb/api/auth/permissions',
+     '🔴 拼装结果必须等于实测可用的代理端点（防写成 authApiBase ⇒ /auth/auth/permissions 404）')
+  eq(resolvePermissionsIssuer('/kb/api', idp, 'https://kb.marschat.online'), '/kb/api',
+     '显式指定 → 显式值优先（存量正确接入行为不变）')
+  eq(resolvePermissionsIssuer('/kb/api/', idp, 'https://kb.marschat.online'), '/kb/api',
+     '显式值尾斜杠被归一（避免拼出 //auth/permissions）')
+  eq(resolvePermissionsIssuer(undefined, idp, 'http://localhost'), '/kb/api',
+     '本地开发同结论（不等 IdP 同源）')
+  // 🔴 身份与权限的边界不能越：issuer 被 SSO 客户端消费，绝不能被权限基址顶掉
+  const self = { issuer: 'https://kb.marschat.online/auth-api', apiBase: '/kb/api' }
+  eq(resolvePermissionsIssuer(undefined, self, 'https://kb.marschat.online'), 'https://kb.marschat.online/auth-api',
+     'IdP 与本站点同源 → 保留 issuer（自建 IdP 直供权限点场景不被打破）')
+  eq(resolvePermissionsIssuer(undefined, { issuer: 'https://auth.marschat.online', apiBase: '' },
+     'https://kb.marschat.online'), 'https://auth.marschat.online',
+     '无 apiBase → 兜底 issuer（不可达也只是维持旧行为，不引入新失败）')
+  eq(resolvePermissionsIssuer(undefined, { issuer: 'https://auth.marschat.online/', apiBase: '/x/api' },
+     'https://kb.marschat.online'), '/x/api',
+     'issuer 带尾斜杠仍能正确判同源')
+  eq(resolvePermissionsIssuer('', idp, 'https://kb.marschat.online'), '/kb/api',
+     '空串视为未指定（防 app-config.json 生成空值绕过修复）')
 }
 
 console.log(`\n${'='.repeat(56)}`)

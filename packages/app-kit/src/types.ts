@@ -108,7 +108,11 @@ export interface MarschatAppOptions extends AppOptionsInput {
   /** 运行时配置；缺省自动读 `public/app-config.json`。 */
   runtime?: RuntimeConfig
   /**
-   * 🔴 **权限查询基址**（`fetchPermissions` 用的 issuer），缺省等于 `issuer`。
+   * 🔴 **权限查询基址**（`fetchPermissions` 用的 issuer）。
+   *
+   * **0.1.6 起缺省不再等于 `issuer`**，而是由 `resolvePermissionsIssuer()` 派生：
+   * 显式本值 >（IdP 与本站点同源时的 `issuer`）> 同源代理 `apiBase` > 兜底 `issuer`。
+   * ⚠️ 是 `apiBase` 不是 `authApiBase`：`fetchPermissions` 内部还会拼 `/auth/permissions`。
    *
    * 存在的唯一理由：门户类应用（portal / cosmic-studio）的权限点由**自家后端 BFF 代理**
    * 从 auth-center 取，浏览器**不能**直连 auth-center —— 直连会因缺 CORS/凭据 401，
