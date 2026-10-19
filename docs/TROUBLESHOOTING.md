@@ -706,3 +706,62 @@ S2=$(stat -c%s /home/root01/hive-compose/logs/hive.log); echo $((S2-S1))
 ⇒ **本集群是故意的多主**，三个节点都显示 `PRIMARY` **是正确的**。
 拿「1 PRIMARY + 2 SECONDARY」的直觉去判，会把正常状态误判成故障。
 **排障前先确认集群是单主还是多主**（`SELECT @@group_replication_single_primary_mode`）。
+
+
+---
+
+## 12. 登录类验证：判据、自伤与误区（R10 沉淀）
+
+> 前面 11 节都是「出故障怎么修」，这一节是「**怎么证明登录是好的**」。
+> R9 / R10 两轮各踩过一次「看起来失败其实通过」和「看起来失败其实是自己打的」，故单列。
+
+### 12.1 成功判据必须四条，缺一条都可能放过真故障
+
+1. **业务特征词**：落地页渲染出该应用的业务内容（不是停在登录页、不是空白壳）
+2. **会话态落盘**：localStorage / Cookie 里有 token
+   ⚠️ activecode 是 **`JSESSIONID` Cookie** 承载，localStorage 为空属**已知形态**（`STATUS.md` T-LOW-23），不是失败
+3. **OIDC 换票链**：`/oauth2/token` 或 BFF 换票端点返回 200
+4. **口令输入次数 == 1**：一轮里若需多次输口令 ⇒ SSO 免登没生效
+
+### 12.2 别用 HTTP 状态码判「登录失败」
+
+错密时**只有 cosmic 返回真 401**；portal / kb-web 是 `200 + code:400`；infra 是 `200 + code:401`；activecode 是 `200 + success:false`（见 `STATUS.md` T-LOW-27）。
+
+⇒ 判成败要看**响应体 + 有没有落会话**，不能只看状态码。
+反过来 —— **写断言时若只在 4xx/5xx 才去取响应体，会整片漏掉这四种形态**（R10 第一轮就吃了这个亏）。
+
+### 12.3 `authorize` 那一跳 CDP 观测不到，别硬测
+
+浏览器跳到 IdP 的 `/oauth2/authorize` 是**跨源顶层导航**，CDP 抓不到。
+⇒ 换票链闭合改用**服务端举证**：拿浏览器回调里的 `code` 反查中心库
+
+```sql
+SELECT principal_name, client_id, issued_at
+FROM marschat_auth.oauth2_authorization WHERE <code 相关列> = '<回调里的 code>';
+```
+
+R10 用这条做到了 **36 个 code 全部匹配上**（`principal_name=1(admin)`、client 与时间戳逐条对上）。
+
+### 12.4 先剔除自伤，再谈故障
+
+错密负例会**自己制造** 401 / 500 / ERROR 日志。R10 里 auth-center 窗口内 40 条 ERROR **全部**是测试自伤，
+traceId 与接口层探针逐条对得上，扣掉后真实 ERROR = 0。
+
+⇒ **统计服务端 ERROR 时，先按 traceId 与自己的探针对齐，否则会把自己的脚印当成故障。**
+
+### 12.5 多主集群的写入连通性要「三节点回读」
+
+只查一个节点不足以证明复制正常。做法：改一条配置 → **三节点分别直连回读** → 还原 → 再三节点回读确认已还原。
+
+R10 在 node1 / node2 / node3 上**各直写一次**，确认三节点都接受写且互相同步
+（本集群是多主，三个都显示 `PRIMARY` 是正常状态，见 §11.6）。
+
+### 12.6 看到 404，先问是谁的 404
+
+R10 采到的 7 条 4xx 里：3 条是坑 #41（子路径应用先探 host 根 `app-config.json`）、
+2 条是坑 #42（跨域直连 IdP 取权限）、2 条是测试自伤。
+
+另一类容易误判的：**入口层瞬时 404** —— 源站 nginx 全 200、事后 curl 也 200，只有浏览器那一次 404
+⇒ 定位到公网入口层（见 `STATUS.md` T-LOW-28）。
+
+⇒ **判 404 先分清：应用侧 / 入口层 / 自己发的。**
