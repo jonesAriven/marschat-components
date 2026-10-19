@@ -765,3 +765,70 @@ R10 采到的 7 条 4xx 里：3 条是坑 #41（子路径应用先探 host 根 `
 ⇒ 定位到公网入口层（见 `STATUS.md` T-LOW-28）。
 
 ⇒ **判 404 先分清：应用侧 / 入口层 / 自己发的。**
+
+---
+
+
+---
+
+
+---
+
+## 13. R11 沉淀：入口断言的真源与验证范围边界（2026-10-19）
+
+> 前 12 节是「怎么修」和「怎么证成立」，这一节是「**怎么避免把非缺陷判成缺陷**」。
+> R11 的 5 条 FAIL 里有 **0 条真实失败**，剩下全部通往同一个教训：要么入口 URL 转抄错误，要么断言判据过度泛化。
+
+### 13.1 断言用的入口 URL，必须从配置真源取（R11 最大教训）
+
+R11 的任务简报把 activecode 公网入口写成 `https://code.marschat.online/activecode/`、kb-ops 写成 `https://ops.marschat.online/ops/` —— **两个都是转抄上轮报告时的笔误**，结果 QA 严格测出一个「P1 入口契约失败」，白白花了一轮去定性。
+
+🔴 **六应用的公网入口，唯一真源是 `devtools/apps-registry.yml` 的 `frontend.entry`**：
+
+| 应用 | 公网入口（真源值） |
+|---|---|
+| portal | `https://main.marschat.online/portal/` |
+| kb-web | `https://kb.marschat.online/kb/` |
+| kb-ops | `https://kb.marschat.online/ops/`（**不是** `ops.marschat.online`） |
+| infra-monitor | `https://monitor.marschat.online/infra/` |
+| cosmic-studio | `https://cosmic.marschat.online/` |
+| activecode | `https://tools.marschat.online/activecode/`（**不是** `code.marschat.online`） |
+
+⇒ **写断言前先 `grep -n "entry:" devtools/apps-registry.yml`**；报错先疑真源勘误，再疑生产。
+
+### 13.2 infra 的 `/api/api` 双前缀是正确实现，不是配置漂移
+
+应用侧 nginx `location /infra/api/` → `proxy_pass .../infra/` **会剥掉一层 `/api`**，所以浏览器必须发 `/infra/api/api/admin/users`。
+
+**自证方法**：请求 `/infra/api/admin/settings/users`，后端回「接口不存在: `/infra/admin/settings/users`」—— 报错里的路径比请求路径**少了一层 `/api`**，这就是剥层的直接证据。
+
+⇒ 判据**不要**写成「出现 `/api/api` 即 FAIL」；应改成「存在双前缀时后端必须返 200」。对照 portal / kb-web / kb-ops / cosmic 均无双前缀，属各应用 nginx 形态差异，不是组件缺陷。
+
+### 13.3 「先怀疑用例，再怀疑产品」
+
+| FAIL | 表象 | 真因 |
+|---|---|---|
+| 入口契约 2 条 | 「activecode 入口 404」 | 简报笔误（见 13.1） |
+| `/api/api` 双前缀 1 条 | 「基址配置漂移」 | nginx 改写强制（见 13.2） |
+| app 作用域可编辑控件 2 条 | 「只读视图没退化，越权风险」 | 选择器取的是全页可见 `input`，把列表页查询框算进去了；限定到可见 `.el-dialog` 后 `editable=0`、标题「用户信息（只读）」、无「确定」按钮 |
+
+⇒ **判据越泛，假阳性越多**：不要用「包含某子串」当 FAIL 条件；改用「限定 DOM 子树 + 变异自测」的两轮法。
+
+### 13.4 判「前端版本」不能用函数名计数
+
+`resolvePermissionsIssuer` / `runtimeConfigCandidates` 是**函数名**，esbuild 顶层 mangling 后会被改名 —— 生产 bundle 里数到 0 **不等于**没升版本（R11 第一轮就差点据此下错结论）。
+
+可靠判据只有两条：
+
+1. **锁文件里的确切版本**（最硬）：`pnpm-lock.yaml` 中 `specifier` 与 `version` 两行。
+2. **浏览器实际发出的请求**（次硬）：跨域 `auth.marschat.online/auth/permissions` ⇒ 旧包；同源 `/{ctx}/api/auth/permissions` ⇒ 已升 0.1.6。
+
+R11 实测五应用锁文件分别钉 **0.1.2 / 0.1.2 / 0.1.4 / 0.1.4 / 0.1.4**，而 caret 范围（`^0.1.2` = `>=0.1.2 <0.2.0`）**均已覆盖 0.1.6** ⇒ 卡点在**锁文件**不在版本约束，重解析锁 + 重建即可。
+
+⚠️ 另一条同源教训：**取证前先确认克隆新鲜度** —— mykng 的 `/root/devtools` HEAD 陈旧至 2026-10-04，早于 10-07 的 Phase 13 迁移，从它读到的依赖清单与实际不符。
+
+### 13.5 服务端 ERROR 先归因，再下结论
+
+R11 命中 71 条，逐条归因后**真实故障 0**：68 条是「用户名或密码错误」（本次错密负例自伤）+ 2 条是 `sys/health/check` 响应体含 `5xx` 字样导致的正则误匹配 + 1 条是已知端点不存在（主动探测触发）。
+
+⇒ 统计服务端 ERROR 前，**先按 traceId 与自己的探针对齐**，否则会把自己的脚印当成故障。

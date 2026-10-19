@@ -88,6 +88,196 @@ export function runtimeConfigCandidates(baseUrl?: string, pathname?: string): st
   return out
 }
 
+/**
+ * 运行时配置读取的**纯函数化拆分**（0.1.7）。
+ *
+ * 🔴 缺陷背景（坑 #41；R7–R11 五轮浏览器回归反复出现）：
+ * 此前 `readRuntimeConfig()` 的失败路径**完全静默** —— 所有候选都拿不到配置时直接 `return {}`，
+ * 调用方回落编译期内置默认值：**不抛错、不 warn**，控制台只有一条不含 URL 的 404。
+ * 于是每轮回归都要人工翻 Network 记录、逐条比对 URL 才能定性
+ * 「这份应用的运行时配置其实整份没生效」，同一份取证成本连付五轮；
+ * 而 root cause（子路径应用以 `/` 为基址）早在 0.1.5 就在公共包修好了 ——
+ * 现象照旧，是因为**失效本身不可见**。
+ *
+ * 拆分原则：**IO（XHR）与「判定 + 文案」分离**，判定与文案都是纯函数，可零依赖单测。
+ * 判据**逐字保留**旧实现（`200 + 非对象 ⇒ 不算成功`），只是不再「不作声地 continue」。
+ */
+
+/** 单个候选探测的失败归因。 */
+export type RuntimeConfigFailureReason =
+  /** HTTP 状态非 200（最常见：context-path 应用打到了根路径）。 */
+  | 'http-not-200'
+  /** 200 但响应体为空（剥掉 `//` 横幅后为空也算）。 */
+  | 'empty-body'
+  /** 200 且 JSON 合法，但顶层**不是对象**（数组 / 字符串 / 数字 / `null`）。 */
+  | 'not-an-object'
+  /** JSON 解析失败（含 SPA try_files 回的 `index.html`、未剥净的 `//` 横幅）。 */
+  | 'parse-error'
+
+/** 一次**失败**探测的记录 —— 告警文案的唯一数据源。 */
+export interface RuntimeConfigAttempt {
+  /** 完整探测地址（含 `app-config.json`），便于直接贴进浏览器地址栏复核。 */
+  url: string
+  /** HTTP 状态码；请求本身抛错时为 0。 */
+  status: number
+  reason: RuntimeConfigFailureReason
+}
+
+/** 探测器的返回形态（纯数据，便于测试注入假实现）。 */
+export interface RuntimeConfigProbeResult {
+  status: number
+  body: string
+}
+
+/** 同步探测一个 URL（生产实现是同步 XHR；测试注入纯函数）。 */
+export type RuntimeConfigProbe = (url: string) => RuntimeConfigProbeResult
+
+/** 一次完整探测的结果。 */
+export interface RuntimeConfigLoadResult {
+  /** 命中的运行时配置；**全败时为 `null`**（调用方据此回落 `{}`）。 */
+  config: RuntimeConfig | null
+  /** 失败记录；**成功路径恒为空数组**（调用方据此不产生任何日志）。 */
+  attempts: RuntimeConfigAttempt[]
+  /**
+   * 需要输出的告警文案（**单条**）。
+   *
+   * 🔴 只在**全部候选都失败**时才非空；成功路径恒为空串。
+   *    候选探测本来就会产生若干 404，逐条 warn 会淹掉控制台，
+   *    所以这里**聚合成一条**，每条 URL 与其归因都列在文案里。
+   */
+  warning: string
+}
+
+/** 剥掉生成器产物的 `// AUTO-GENERATED ...` 横幅（它不是合法 JSON）。 */
+function stripRuntimeConfigBanner(raw?: string | null): string {
+  return String(raw ?? '').replace(/^\s*\/\/.*$/gm, '')
+}
+
+/**
+ * 解析运行时配置文本（纯函数，不抛异常）。
+ *
+ * ⚠️ 判据与 0.1.6 逐字一致，**不得放宽**：
+ *   ① 先剥 `//` 横幅 → ② `JSON.parse` → ③ **顶层必须是对象**（非数组、非 null）。
+ *   ③ 是踩坑换来的：SPA 的 `try_files` 兜底会把任意 404 路径回成 `index.html`
+ *   （状态 200、内容 HTML），拿到非对象就必须判失败，否则等于拿 HTML 当配置。
+ *
+ * @returns 解析成功返回配置对象；空串 / null / undefined / 非法 JSON / 非对象一律 `null`
+ */
+export function parseRuntimeConfig(raw?: string | null): RuntimeConfig | null {
+  const text = stripRuntimeConfigBanner(raw)
+  if (text.trim() === '') {
+    return null
+  }
+  let parsed: unknown
+  try {
+    parsed = JSON.parse(text) as unknown
+  } catch {
+    return null                       // 非法 JSON（含 HTML）—— 不抛异常，交由调用方换下一个候选
+  }
+  // 🔴 必须判对象：数组 / 字符串 / 数字 / `null` 都不是合法配置
+  if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
+    return parsed as RuntimeConfig
+  }
+  return null
+}
+
+/**
+ * 判定「解析失败」的**具体归因**（供告警文案归因）。
+ *
+ * 与 `parseRuntimeConfig` 共用 `stripRuntimeConfigBanner`，判据无第二套实现：
+ * 剥横幅后为空 ⇒ `empty-body`；`JSON.parse` 抛错 ⇒ `parse-error`；
+ * 能解析但仍被判失败 ⇒ 只可能是「不是对象」。
+ */
+export function classifyRuntimeConfigFailure(raw?: string | null): RuntimeConfigFailureReason {
+  const text = stripRuntimeConfigBanner(raw)
+  if (text.trim() === '') {
+    return 'empty-body'
+  }
+  try {
+    JSON.parse(text) as unknown
+  } catch {
+    return 'parse-error'
+  }
+  return 'not-an-object'
+}
+
+/** 失败归因 → 中文说明。 */
+const RUNTIME_CONFIG_REASON_TEXT: Record<RuntimeConfigFailureReason, string> = {
+  'http-not-200': 'HTTP 状态非 200（该地址下没有 app-config.json）',
+  'empty-body': '响应体为空（200 但没有任何内容）',
+  'not-an-object': '响应体是 JSON 但顶层不是对象（数组 / null 等，不是合法配置）',
+  'parse-error': 'JSON 解析失败（多半是 SPA try_files 回的 index.html，或未剥净的 // 横幅）',
+}
+
+/**
+ * 把失败探测记录拼成**一条**可操作的中文告警（纯函数）。
+ *
+ * 文案三要素：① 每个探测过的**完整 URL** 与其失败原因；② 明确说明「已回落内置默认值」；
+ * ③ 给出可操作提示（`contextPath` / `apiBase` 是否登记、`gen-from-registry.py` 是否跑过）。
+ *
+ * @returns attempts 为空数组时返回**空字符串**（调用方据此跳过日志，保持控制台干净）
+ */
+export function formatRuntimeConfigWarning(attempts: RuntimeConfigAttempt[]): string {
+  if (!attempts || attempts.length === 0) {
+    return ''
+  }
+  const head = '[marschat-app-kit] 运行时配置 app-config.json 未取到，已回落内置默认值'
+    + '（本次启动的运行时配置整份不生效）。'
+  const detail = attempts.map((attempt, index) => {
+    const reason = RUNTIME_CONFIG_REASON_TEXT[attempt.reason] ?? attempt.reason
+    return `  ${index + 1}. ${attempt.url} —— ${reason}（HTTP ${attempt.status}）`
+  })
+  return [
+    head,
+    `已探测 ${attempts.length} 个候选地址，全部失败：`,
+    ...detail,
+    '排查：① 确认该应用的 contextPath / apiBase 已登记在 devtools/apps-registry.yml；'
+      + '② 跑过 gen-from-registry.py 重新生成 app-config.json；'
+      + '③ 确认产物已发布到上面列出的目录下（子路径应用必须落在其 contextPath 目录下）。',
+  ].join('\n')
+}
+
+/**
+ * 按顺序探测候选基址，返回「命中的配置 / 失败记录 / 单条告警」（纯函数，IO 由 `probe` 注入）。
+ *
+ * 🔴 两条铁律（0.1.7 修复的核心）：
+ *   a. **成功路径零日志** —— 任一候选命中即立刻返回，`attempts` 为空、`warning` 为空串。
+ *   b. **全败才告警，且只有一条** —— 逐条 warn 会淹掉控制台（探测本来就带若干 404）。
+ *
+ * @param urls 候选基址（由 `runtimeConfigCandidates` 产出，已按优先级排序）
+ * @param probe 同步探测器（生产侧为同步 XHR；抛错视为本候选失败）
+ */
+export function loadRuntimeConfig(
+  urls: string[],
+  probe: RuntimeConfigProbe,
+): RuntimeConfigLoadResult {
+  const attempts: RuntimeConfigAttempt[] = []
+  for (const base of urls ?? []) {
+    const url = `${base}app-config.json`
+    let result: RuntimeConfigProbeResult
+    try {
+      result = probe(url)
+    } catch {
+      attempts.push({ url, status: 0, reason: 'http-not-200' })
+      continue
+    }
+    const status = Number(result?.status ?? 0)
+    const body = typeof result?.body === 'string' ? result.body : ''
+    if (status !== 200) {
+      attempts.push({ url, status, reason: 'http-not-200' })
+      continue
+    }
+    const config = parseRuntimeConfig(body)
+    if (config) {
+      // 成功：立刻返回，**不产生任何日志**（attempts 恒为空数组 ⇒ 调用方跳过日志）
+      return { config, attempts: [], warning: '' }
+    }
+    attempts.push({ url, status, reason: classifyRuntimeConfigFailure(body) })
+  }
+  return { config: null, attempts, warning: formatRuntimeConfigWarning(attempts) }
+}
+
+
 /** 会话模式：`oidc` = 浏览器直接持中心 OIDC token；`bff` = 服务端换票（如 portal）。 */
 export type SessionMode = 'oidc' | 'bff'
 

@@ -44,9 +44,11 @@ import {
   resolveAppConfig,
   resolvePermissionsIssuer,
   runtimeConfigCandidates,
+  loadRuntimeConfig,
   toRouterPath,
   type ResolvedAppConfig,
   type RuntimeConfig,
+  type RuntimeConfigProbeResult,
 } from './config'
 import type {
   MarschatApp,
@@ -59,31 +61,40 @@ import type {
  * 读取运行时配置 `public/app-config.json`（由 `apps-registry.yml` 派生）。
  *
  * ⚠️ 坑 #4：生成器产物首行是 `// AUTO-GENERATED ...` 横幅，**不是合法 JSON**；
- * 不剥注释直接 `JSON.parse` 会抛错 → 运行时配置静默失效、回落编译期默认值。
+ * 不剥注释直接 `JSON.parse` 会抛错 → 运行时配置失效、回落编译期默认值。
  * 同步 XHR 是为了让消费方在模块求值期即可拿到常量（与既有各应用同口径）。
+ *
+ * ⚠️ 坑 #41（0.1.7 修复）：失败路径**曾经完全静默** —— 全败时直接 `return {}`，
+ * 调用方回落内置默认值，**不抛错、不 warn**，控制台只有一条不含 URL 的 404。
+ * 代价真实且反复发生：R7–R11 **五轮**浏览器回归，每轮都要人工翻 Network 记录、
+ * 逐条比对 URL 才能定性「这份应用的运行时配置其实整份没生效」，同一取证成本连付五轮。
+ * 现在**全败时输出一条**含全部候选 URL 与归因的中文告警（见 `formatRuntimeConfigWarning`），
+ * **成功路径仍零日志**；判定与文案一律走 `config.ts` 的纯函数，可零依赖单测。
  */
 export function readRuntimeConfig(baseUrl?: string): RuntimeConfig {
   const pathname = typeof window !== 'undefined' ? window.location.pathname : undefined
-  for (const base of runtimeConfigCandidates(baseUrl, pathname)) {
-    try {
-      const xhr = new XMLHttpRequest()
-      xhr.open('GET', `${base}app-config.json`, false)
-      xhr.send(null)
-      if (xhr.status !== 200) {
-        continue                      // 本候选不存在，换下一个（不写日志，避免控制台噪音）
-      }
-      const raw = xhr.responseText.replace(/^\s*\/\/.*$/gm, '')
-      const parsed = JSON.parse(raw) as unknown
-      // 🔴 SPA 的 try_files 兜底会把任意 404 路径回成 index.html（200 + HTML）：
-      //    JSON.parse 能过（HTML 不行）但拿到非对象 —— 必须判对象，否则拿 HTML 当配置。
-      if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
-        return parsed as RuntimeConfig
-      }
-    } catch {
-      /* 拉取/解析失败 → 试下一个候选；全败则回落默认值（本地开发无产物也能跑） */
-    }
+  const result = loadRuntimeConfig(
+    runtimeConfigCandidates(baseUrl, pathname),
+    probeRuntimeConfigWithXhr,
+  )
+  // 🔴 只在**全部候选都失败**时告警一次：探测本来就带若干 404，逐条 warn 会淹掉控制台
+  if (result.warning) {
+    console.warn(result.warning)
   }
-  return {}
+  return result.config ?? {}
+}
+
+/**
+ * 同步 XHR 探测（与既有实现同口径：模块求值期即可拿到常量）。
+ *
+ * 请求本身抛错（网络错误 / 无 XHR 环境）由 `loadRuntimeConfig` 归因为一条 attempt，
+ * 不再像旧实现那样被空的 `catch {}` 整体吞掉。
+ */
+function probeRuntimeConfigWithXhr(url: string): RuntimeConfigProbeResult {
+  const xhr = new XMLHttpRequest()
+  xhr.open('GET', url, false)
+  xhr.send(null)
+  return { status: xhr.status, body: xhr.responseText || '' }
 }
 
 /**
