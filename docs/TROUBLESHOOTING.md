@@ -832,3 +832,44 @@ R11 实测五应用锁文件分别钉 **0.1.2 / 0.1.2 / 0.1.4 / 0.1.4 / 0.1.4**�
 R11 命中 71 条，逐条归因后**真实故障 0**：68 条是「用户名或密码错误」（本次错密负例自伤）+ 2 条是 `sys/health/check` 响应体含 `5xx` 字样导致的正则误匹配 + 1 条是已知端点不存在（主动探测触发）。
 
 ⇒ 统计服务端 ERROR 前，**先按 traceId 与自己的探针对齐**，否则会把自己的脚印当成故障。
+
+### 13.6 「推送 ≠ 生效」的最后一段：devtools 流水线是 manual 触发
+
+0.1.7 落地时实证：`ac0f9b00`（四前端锁文件）双推成功后，devtools 最新流水线**仍是 #852（commit `179fdf8e`）**——一条都没跑。
+
+根因：devtools `.woodpecker.yml` 的触发条件是 `when: event: [manual], branch: [dev]`，**push 到 dev 不触发任何构建**；而 cosmic-studio 是 `event: [push, manual]`，但它的 forge 配的是 **GitHub**，只推 Gitee 同样不触发（必须双推；本机直推 GitHub 偶有断网阻断，必要时从 mykng 代推，详见用户记忆 `topics/infra-ops.md`）。
+
+⇒ 「四段验」（仓库 → Nexus → 应用依赖 + 锁文件 → **线上产物**）的第四段有两个触发陷阱：
+
+| 仓库 | 触发方式 | 陷阱 |
+|---|---|---|
+| devtools | 仅 `manual` | push 永不触发，必须调 API / UI 手动触发 |
+| cosmic-studio | `push` + `manual`，forge = GitHub | 只推 Gitee 不触发，必须双推 |
+
+**防复发动作**：改完锁文件推送后，**必须主动查一次流水线**，确认最新一条的 commit 是自己的：
+
+```bash
+curl -s "https://woodci.marschat.online/api/repos/1/pipelines?perPage=3" \
+  -H "Authorization: Bearer $WOODPECKER_TOKEN"   # repo 1=devtools 3=cosmic-studio 4=auth-center 5=marschat-components
+```
+
+只看 `git log` / 推送回显就下「已上线」结论，是这一轮最容易踩的坑。另外 devtools 的 `sync-ci-scripts` 步骤会 `find /mnt/shared/woodScript -mindepth 1 -delete` 后重写，**多个流水线并发触发会 races**，多目标部署要串行触发（本轮四前端：kb-ops-web → kb-web → infra-monitor-web → portal-web，其中 kb-web 与 ops-web 本身有部署串行依赖）。
+
+### 13.7 0.1.7 的生产确认三判据（R12）
+
+0.1.7 的核心价值不是「会告警」，而是把「静默失效」变成可见。生产侧确认它真的在工作，用三个判据（都在 headless 浏览器里跑，本机零窗口）：
+
+1. **console 零 `[marschat-app-kit]` 告警** —— 0.1.7 铁律是「成功路径零日志、全败才告警且只有一条」。只要任何应用出现**一条**该告警，就说明该应用本次启动的运行时配置**整份没生效**（回落内置默认值），不必再翻 Network 逐条比对。
+2. **无跨域 `auth.marschat.online/auth/permissions`** —— 配置读不到才会回落跨域默认基址（坑 #42 / T-ENG-11）。跨域请求出现 ⇒ 判配置失效。⚠️ **唯一例外是 kb-ops**：它的 `MainLayout.vue` 显式用手写 `permOptions`（`issuer` = IdP）绕过 app-kit 句柄，且后端没有同源代理端点 ⇒ 该判据对 kb-ops 恒不成立（3/3 轮复现，见 `STATUS.md` `T-ENG-17`）。其余五应用（portal / kb-web / infra / cosmic / activecode）均通过。
+3. **应用自身 contextPath 下 `app-config.json` 返回 200** —— 配置真的取到了。注意探测候选本来就会依次试若干地址（含 host 根），**候选 404 是预期行为**，只有「全败」才告警，所以不要用「有没有 404」判健康，要用「有没有告警」判。
+
+**产物级判据**（不依赖浏览器）：下载在线 entry chunk，查 0.1.7 签名串——
+
+```
+个候选地址，全部失败
+HTTP 状态非 200（该地址下没有 app-config.json）
+已登记在 devtools/apps-registry.yml
+运行时配置 app-config.json 未取到，已回落内置默认值
+```
+
+esbuild 生产构建会**改写函数名**但不动字符串字面量，所以签名串稳定可查（§13.4 的教训反过来用：不能数函数名，但可以数字符串）。本轮实测：**五应用在线 chunk 均含全部签名** —— portal `main.marschat.online/portal/assets/index-7xfla58k.js`、kb-web `kb.marschat.online/kb/s/assets/index-CZTSAPiD.js`、kb-ops `kb.marschat.online/ops/assets/index-6dfHHtUi.js`、infra `monitor.marschat.online/infra/assets-v2/index-DHJXEVRp.js`、cosmic `cosmic.marschat.online/assets/index-url5nkxf.js`。
