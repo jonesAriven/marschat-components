@@ -20,6 +20,13 @@ import {
   classifyRuntimeConfigFailure,
   formatRuntimeConfigWarning,
   loadRuntimeConfig,
+  buildPermissionsUrl,
+  classifyPermissionsFailure,
+  formatPermissionsWarning,
+  warnPermissionsFailure,
+  createPermissionsWarnDedupe,
+  resetPermissionsWarnDedupe,
+  PERMISSIONS_FAIL_OPEN_CONSEQUENCE,
 } from '../src/config.ts'
 
 let passed = 0
@@ -460,6 +467,184 @@ console.log('\n[14] 运行时配置解析与失败告警 —— 静默失效改�
     eq(ok.warnings.length, 0, '🔴 F·成功路径 warn 次数为 0（控制台零噪音）')
     const mid = asCaller(['/kb/', '/'], fake({ '/app-config.json': { status: 200, body: '{"a":1}' } }))
     eq(mid.warnings.length, 0, '🔴 F·「先 404 再命中」warn 次数为 0（中途失败不产生日志）')
+  }
+}
+
+console.log('\n[15] 权限探针失败归因与告警 —— fail-open 不再「静默全放行」（坑 #43，0.1.8）')
+{
+  // 🔴 变异自测（本组用例存在的理由，改本文件时务必保留这三条捕获）：
+  //    变异体 A = `classifyPermissionsFailure` 忽略 `err` ⇒ CORS/网络错误被误判成 'unknown'
+  //              ⇒ 「归因① network-error」断言立刻失败；
+  //    变异体 B = `warnPermissionsFailure` 去掉去重（每次都 log）⇒
+  //              「同一 URL + 同一原因只打一次」断言（logs.length === 1）立刻失败；
+  //    变异体 C = `formatPermissionsWarning` 去掉后果句 ⇒
+  //              「文案含 fail-open 后果说明」断言立刻失败。
+  //    三条变异体在下面被**真实执行**（不是只写在注释里）：先证明变异体会跑出错误结果，
+  //    再证明真实实现跑不出那个结果 ⇒ 断言确有约束力。任一捕获不成立 ⇒ 本组用例无效，必须重写。
+
+  const URL_A = 'https://auth.marschat.online/auth/permissions?client=marschat-kbops'
+  const URL_B = 'https://kb.marschat.online/kb/api/auth/permissions?client=marschat-kbweb'
+
+  // ---- buildPermissionsUrl：与 auth-components 的 fetchPermissions 逐字同口径 ----
+  eq(buildPermissionsUrl('https://auth.marschat.online/', 'marschat-kbops'), URL_A,
+     'URL 拼装：尾斜杠被剥 + client 走 encodeURIComponent（与 usePermissions.ts 逐字同口径）')
+  eq(buildPermissionsUrl('/kb/api', 'marschat-kbweb'), '/kb/api/auth/permissions?client=marschat-kbweb',
+     'URL 拼装：同源代理形态（取 apiBase，不是 authApiBase ⇒ 不会拼出 /auth/auth/permissions）')
+  eq(buildPermissionsUrl('/kb/api', 'a b&c'), '/kb/api/auth/permissions?client=a%20b%26c',
+     'URL 拼装：clientId 特殊字符被转义（防拼出畸形 query）')
+
+  // ---- classifyPermissionsFailure：五种归因（+ 业务码 / 未知）各一例 ----
+  eq(classifyPermissionsFailure(new TypeError('Failed to fetch'), null), 'network-error',
+     '归因①：fetch 抛错（含 CORS 跨域被拦）→ network-error')
+  eq(classifyPermissionsFailure(undefined, { status: 403, ok: false }), 'http-not-200',
+     '归因②：HTTP 403 → http-not-200（kb-ops 跨域直连中心的真实形态）')
+  eq(classifyPermissionsFailure(undefined, { status: 200, ok: true }, ''), 'empty-body',
+     '归因③：2xx 但响应体为空 → empty-body')
+  eq(classifyPermissionsFailure(undefined, { status: 200, ok: true },
+    '{"code":200,"data":{"configured":true,"permissions":"menu:users"}}'), 'not-an-array',
+     '归因④：permissions 不是数组 → not-an-array')
+  eq(classifyPermissionsFailure(undefined, { status: 200, ok: true },
+    '<!doctype html><html><body><div id="app"></div></body></html>'), 'parse-error',
+     '归因⑤：2xx 但回的是 index.html → parse-error')
+  eq(classifyPermissionsFailure(undefined, { status: 200, ok: true }, '{"code":401,"message":"无权限"}'),
+    'business-error', '归因⑥：HTTP 通了但业务码非 200 → business-error')
+
+  // 「其实没失败」的合法形态 —— 不得误报（误报会把正常应用刷满告警）
+  eq(classifyPermissionsFailure(undefined, { status: 200, ok: true },
+    '{"code":200,"data":{"configured":true,"permissions":["a:menu:users"]}}'), 'unknown',
+     '合法形态：configured=true + 权限点数组 → unknown（不算失败，不告警）')
+  eq(classifyPermissionsFailure(undefined, { status: 200, ok: true },
+    '{"code":200,"data":{"configured":false}}'), 'unknown',
+     '🔴 合法形态：应用确实没配权限点（configured=false）→ unknown（正常的 fail-open，不得误报）')
+  eq(classifyPermissionsFailure(undefined, null), 'unknown',
+     '既无异常也无响应对象 → unknown（无从归因）')
+
+  // 判据边界
+  eq(classifyPermissionsFailure(undefined, { status: 0, ok: false }), 'http-not-200',
+     '状态码 0 + ok=false → http-not-200（err 才是 network-error 的唯一判据）')
+  eq(classifyPermissionsFailure(undefined, { status: 299, ok: true }, '[]'), 'unknown',
+     '2xx 上界：299 仍算成功')
+  eq(classifyPermissionsFailure(undefined, { status: 301, ok: false }), 'http-not-200',
+     '3xx / 4xx / 5xx 一律 http-not-200')
+  eq(classifyPermissionsFailure(undefined, { status: 200, ok: true }, null), 'empty-body',
+     '响应体为 null → empty-body')
+  eq(classifyPermissionsFailure(undefined, { status: 200, ok: true }, '   \n '), 'empty-body',
+     '响应体纯空白 → empty-body')
+  eq(classifyPermissionsFailure(undefined, { status: 200, ok: true }, '["a:menu:users"]'), 'unknown',
+     '后端直回权限点数组 → 合法')
+  eq(classifyPermissionsFailure(undefined, { status: 200, ok: true }, '"just a string"'), 'not-an-array',
+     'JSON 字符串 → not-an-array（不是 parse-error：解析这一步是成功的）')
+
+  // ---- formatPermissionsWarning：一条告警 = URL + 原因 + 状态 + 后果 ----
+  eq(formatPermissionsWarning(null), '', '空 attempt → **空字符串**（调用方据此跳过日志，不是 undefined）')
+  eq(formatPermissionsWarning({ url: '', status: 0, reason: 'network-error' }), '', 'URL 为空 → 空字符串')
+  const w403 = formatPermissionsWarning({ url: URL_A, status: 403, reason: 'http-not-200' })
+  eq(w403.includes(URL_A), true, '文案含**完整请求 URL**（可直接贴进浏览器复核）')
+  eq(w403.includes('HTTP 403'), true, '文案含 HTTP 状态码')
+  eq(w403.includes('状态非 2xx'), true, '文案含**中文**失败原因')
+  eq(w403.includes('[marschat-app-kit]'), true, '文案沿用 [marschat-app-kit] 前缀')
+  eq(w403.split('[marschat-app-kit]').length - 1, 1, '🔴 只有**一条**告警（前缀只出现一次）')
+  eq(w403.includes(PERMISSIONS_FAIL_OPEN_CONSEQUENCE), true, '🔴 文案含**完整后果说明**（fail-open 全放行）')
+  eq(w403.includes('fail-open'), true, '文案含 fail-open 关键字')
+  eq(w403.includes('全部放行'), true, '文案含「全部放行」')
+  eq(w403.includes('写接口硬闸门不受影响'), true, '文案说明写接口硬闸门不受影响')
+  eq(w403.includes('同源代理'), true, '文案给出可操作提示：改用同源代理')
+
+  const wNet = formatPermissionsWarning({ url: URL_B, status: 0, reason: 'network-error' })
+  eq(wNet.includes('HTTP 0'), false, '网络错误不写「HTTP 0」（0 不是状态码，写上去会误导排查）')
+  eq(wNet.includes('未拿到 HTTP 响应'), true, '网络错误明说「未拿到 HTTP 响应」')
+  eq(wNet.includes('CORS'), true, '网络错误文案点名 CORS（跨域被拦是第一大来源）')
+
+  const wCustom = formatPermissionsWarning({ url: URL_B, status: 500, reason: 'http-not-200' }, '自定义后果')
+  eq(wCustom.includes('自定义后果'), true, '后果说明可被注入覆盖')
+  eq(wCustom.includes(PERMISSIONS_FAIL_OPEN_CONSEQUENCE), false, '覆盖后不再出现默认后果句')
+
+  for (const r of ['network-error', 'http-not-200', 'empty-body', 'not-an-array', 'parse-error', 'business-error']) {
+    const text = formatPermissionsWarning({ url: URL_B, status: 200, reason: r })
+    eq(text.includes('失败原因：') && text.length > 60, true, `六种归因（${r}）都有中文说明且文案非空`)
+  }
+
+  // ---- warnPermissionsFailure：同 URL + 同原因只告警一次（防刷屏） ----
+  {
+    resetPermissionsWarnDedupe()
+    const logs = []
+    const attempt = { url: URL_A, status: 403, reason: 'http-not-200' }
+    eq(warnPermissionsFailure(attempt, { log: (m) => logs.push(m) }), true, '首次告警 → 返回 true（确实打了）')
+    eq(warnPermissionsFailure(attempt, { log: (m) => logs.push(m) }), false, '🔴 第二次（同 URL 同原因）→ false（去重生效）')
+    eq(warnPermissionsFailure(attempt, { log: (m) => logs.push(m) }), false, '🔴 第三次同样被拦下（路由守卫每次导航都会走到这里）')
+    eq(logs.length, 1, '🔴 三次调用只产出 **1 条**告警（变异体「不去重」会得到 3 ⇒ 被抓住）')
+    eq(logs[0], w403, '打出去的正是 formatPermissionsWarning 的那一条')
+    eq(warnPermissionsFailure({ url: URL_A, status: 0, reason: 'network-error' }, { log: (m) => logs.push(m) }), true,
+       '同一 URL 换**原因** → 再告警一次（去重键 = 原因 + URL，换原因说明换了失败形态，不能吞）')
+    eq(logs.length, 2, '换原因后累计 2 条')
+    eq(warnPermissionsFailure({ url: URL_B, status: 403, reason: 'http-not-200' }, { log: (m) => logs.push(m) }), true,
+       '换个 URL → 再告警一次')
+    eq(logs.length, 3, '换 URL 后累计 3 条')
+    resetPermissionsWarnDedupe()
+  }
+
+  // ---- 独立 dedupe 注入（多实例 / 测试隔离） ----
+  {
+    const dedupe = createPermissionsWarnDedupe()
+    const logs = []
+    const attempt = { url: URL_B, status: 500, reason: 'http-not-200' }
+    eq(warnPermissionsFailure(attempt, { dedupe, log: (m) => logs.push(m) }), true, '注入 dedupe：首次 → true')
+    eq(warnPermissionsFailure(attempt, { dedupe, log: (m) => logs.push(m) }), false, '注入 dedupe：第二次 → false')
+    eq(logs.length, 1, '注入 dedupe：只打一次')
+    eq(warnPermissionsFailure(attempt, { dedupe: createPermissionsWarnDedupe(), log: (m) => logs.push(m) }), true,
+       '另一个 dedupe 互不影响 → 仍为 true')
+    eq(logs.length, 2, '两个 dedupe 各自计一次')
+  }
+
+  // ---- 🔴 变异自测（真实执行） ----
+  {
+    // 变异体 A：忽略 err（把 fetch 抛错当成「没有响应」）
+    const mutantA = (response, body) => classifyPermissionsFailure(undefined, response, body)
+    eq(mutantA(null, undefined), 'unknown', 'A·变异体把 fetch 抛错误判成 unknown')
+    eq(mutantA(null, undefined) !== classifyPermissionsFailure(new TypeError('Failed to fetch'), null), true,
+       '🔴 A·变异体被抓到：忽略 err 会让「归因① network-error」断言失败')
+    // 变异体 B：去掉去重（每次都打）
+    const attempt = { url: 'https://x/api/auth/permissions?client=c', status: 403, reason: 'http-not-200' }
+    const mutantLogs = []
+    const mutantB = (a) => {
+      mutantLogs.push(formatPermissionsWarning(a))
+      return true
+    }
+    mutantB(attempt)
+    mutantB(attempt)
+    mutantB(attempt)
+    eq(mutantLogs.length, 3, 'B·变异体（不去重）连打 3 条')
+    const realLogs = []
+    const dedupe = createPermissionsWarnDedupe()
+    warnPermissionsFailure(attempt, { dedupe, log: (m) => realLogs.push(m) })
+    warnPermissionsFailure(attempt, { dedupe, log: (m) => realLogs.push(m) })
+    warnPermissionsFailure(attempt, { dedupe, log: (m) => realLogs.push(m) })
+    eq(realLogs.length, 1, '🔴 B·变异体被抓到：真实实现只打 1 条（3 ≠ 1 ⇒ 「只打一次」断言有约束力）')
+    // 变异体 C：去掉后果句
+    const mutantC = (a) => formatPermissionsWarning(a)
+      .split('\n').filter((line) => !line.startsWith('后果：')).join('\n')
+    eq(mutantC(attempt).includes(PERMISSIONS_FAIL_OPEN_CONSEQUENCE), false, 'C·变异体（去掉后果句）不再含后果说明')
+    eq(formatPermissionsWarning(attempt).includes(PERMISSIONS_FAIL_OPEN_CONSEQUENCE), true,
+       '🔴 C·变异体被抓到：真实实现含后果说明 ⇒ 「含 fail-open 后果」断言有约束力')
+  }
+
+  // ---- 端到端：kb-ops 跨域直连恒 403 的真实现场（2026-10-20 R12 实测） ----
+  {
+    const logs = []
+    const dedupe = createPermissionsWarnDedupe()
+    const url = buildPermissionsUrl('https://auth.marschat.online', 'marschat-kbops')
+    const attempt = { url, status: 403, reason: classifyPermissionsFailure(undefined, { status: 403, ok: false }) }
+    eq(attempt.reason, 'http-not-200', 'E2E·kb-ops 现场归因 = http-not-200')
+    warnPermissionsFailure(attempt, { dedupe, log: (m) => logs.push(m) })
+    eq(logs.length, 1, 'E2E·产出一条告警')
+    eq(logs[0].includes('https://auth.marschat.online/auth/permissions?client=marschat-kbops'), true,
+       'E2E·告警含真实请求地址（跨域直连中心 ⇒ 一眼看出该走同源代理）')
+    eq(logs[0].includes('403'), true, 'E2E·告警含 403')
+    eq(logs[0].includes('全部放行'), true, 'E2E·告警明说「已全部放行」')
+    for (let i = 0; i < 20; i += 1) {
+      warnPermissionsFailure(attempt, { dedupe, log: (m) => logs.push(m) })
+    }
+    eq(logs.length, 1, '🔴 E2E·20 次导航仍只有 1 条告警（防刷屏铁律）')
   }
 }
 

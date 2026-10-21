@@ -37,6 +37,7 @@ import {
   createUserAdminClient,
   clearTokens,
   type SessionWatcher,
+  type UsePermissionsOptions,
 } from '@marschat/auth-components'
 import { createRequest, createAuthGuard, type TokenStore } from '@marschat/frontend-common'
 import { createMarschatShell, type ShellOptions } from './shell'
@@ -46,6 +47,10 @@ import {
   runtimeConfigCandidates,
   loadRuntimeConfig,
   toRouterPath,
+  buildPermissionsUrl,
+  classifyPermissionsFailure,
+  warnPermissionsFailure,
+  type PermissionsResponseLike,
   type ResolvedAppConfig,
   type RuntimeConfig,
   type RuntimeConfigProbeResult,
@@ -118,6 +123,92 @@ function clearLocalSession(clearExtraAuth?: () => void): void {
     clearExtraAuth?.()
   } catch {
     /* ignore：应用钩子抛错不得让「已清令牌」的登出流程整体失败 */
+  }
+}
+
+/**
+ * 已做过归因诊断的权限地址（模块级：页面会话内只探一次）。
+ *
+ * 🔴 为什么必须收口：权限探针会被**路由守卫每次导航**触发一次；
+ * 若每次都补发一次诊断请求，一个会话几十次导航就多几十个请求 ——
+ * 那是把「看不见失败」换成「制造新噪音」，同样不可取。
+ */
+const DIAGNOSED_PERMISSIONS_URLS = new Set<string>()
+
+/**
+ * 对权限探针地址做**一次**归因诊断，失败则输出一条可归因告警（0.1.8）。
+ *
+ * ⚠️ 只 `console.warn`，**不改变 fail-open 语义**：不拦截、不跳转、不抛错。
+ * 诊断请求用的是与 `fetchPermissions` **同一个** URL 与同一份令牌，
+ * 因此归因出来的状态码 / 响应体就是真实那一次请求的结论。
+ */
+async function diagnosePermissionsFailure(url: string, token?: string | null): Promise<void> {
+  const headers: Record<string, string> = token ? { Authorization: `Bearer ${token}` } : {}
+  let response: PermissionsResponseLike | null = null
+  let payload: unknown = undefined
+  try {
+    const res = await fetch(url, { headers })
+    response = { status: res.status, ok: res.ok }
+    // 取文本而不是 `.json()`：`fetchPermissions` 的一大失败来源正是「2xx 但 body 不是 JSON」
+    payload = await res.text()
+  } catch (err) {
+    // fetch 抛错（含 CORS 被拦）⇒ 连响应对象都没有
+    warnPermissionsFailure({ url, status: 0, reason: classifyPermissionsFailure(err, null) })
+    return
+  }
+  const status = Number(response?.status ?? 0)
+  const reason = classifyPermissionsFailure(undefined, response, payload)
+  if (reason === 'unknown') {
+    // HTTP 2xx 且响应体合法 ⇒ 只是该应用尚未配置权限点（**正常的** fail-open），不告警
+    return
+  }
+  warnPermissionsFailure({ url, status, reason })
+}
+
+/**
+ * 权限预取 + 失败归因（0.1.8）—— 路由守卫与 `bootstrap()` 两处共用同一入口。
+ *
+ * 顺序很关键：**先走 `fetchPermissions`**（它持有组件库的模块级共享状态，
+ * 菜单 / 路由守卫 / PermissionGate 三层同源都读这一份），
+ * 只有在它落到 `configured === false`（即 fail-open **已经发生**）时，
+ * 才补做**一次**诊断探测，拿到「URL + 状态码 + 原因」。
+ *
+ * ⚠️ 为什么不直接改 `fetchPermissions`：它在 `auth-components`，
+ *    其失败路径是**刻意** fail-open 且吞掉异常的（改它会波及全部存量应用）；
+ *    本包只加可见性，不动语义 —— 这是本函数的唯一职责。
+ *
+ * ⚠️ 代价：落到 `configured === false` 的应用**每会话多一次** GET；
+ *    成功路径（`configured === true`）零额外请求、零日志。
+ */
+export async function ensurePermissions(permissions: UsePermissionsOptions): Promise<void> {
+  let configured = false
+  try {
+    const state = await fetchPermissions(permissions)
+    configured = !!state?.configured
+  } catch {
+    // fail-open：预取异常不阻塞启动（与既有行为逐字一致）
+    configured = false
+  }
+  if (configured) {
+    return
+  }
+  // 🔴 未携带令牌（用户尚未登录）⇒ 权限探针拿不到权限点是**预期**的，不是缺陷：
+  //    若此时也诊断并告警，每个应用每次首屏（登录页）都会挂一条 401 告警，
+  //    那是用噪音换掉可归因性，与「成功路径零日志」的原则相悖。
+  //    登录后再导航时这里才有令牌 ⇒ 归因照常发生（kb-ops 的 403 正是登录后才暴露的）。
+  const token = permissions.getToken?.()
+  if (!token) {
+    return
+  }
+  const url = buildPermissionsUrl(permissions.issuer, permissions.clientId)
+  if (DIAGNOSED_PERMISSIONS_URLS.has(url)) {
+    return
+  }
+  DIAGNOSED_PERMISSIONS_URLS.add(url)
+  try {
+    await diagnosePermissionsFailure(url, token)
+  } catch {
+    /* ignore：诊断本身失败绝不能反过来影响 fail-open 的既有语义 */
   }
 }
 
@@ -199,7 +290,10 @@ export function createMarschatApp(options: MarschatAppOptions): MarschatApp {
 
   // ⑥ 路由守卫 —— **必须在 `app.use(router)` 之前**注册（坑 #5：否则首屏跳过权限判定）
   createAuthGuard(options.router, {
-    ensure: () => fetchPermissions(permissions),
+    // 🔴 走 `ensurePermissions`（0.1.8）：仍先跑 `fetchPermissions` 保持三层同源，
+    //    额外只在 `configured === false`（fail-open 已发生）时补一次归因诊断 + 一条告警。
+    //    语义不变：fail-open 照样放行，只是失败**可见、可归因**。
+    ensure: () => ensurePermissions(permissions),
     // 与菜单 / PermissionGate 共用 auth-components 的**同一份**权限状态（三层同源铁律）；
     // 不自建判定，避免两套实现漂移。code 支持全码与半码（内部自动补 client 前缀）。
     hasPerm: (code: string) => hasPermission(permissions, code),
@@ -310,7 +404,8 @@ export function createMarschatApp(options: MarschatAppOptions): MarschatApp {
       }
 
       if (options.prefetchPermissions !== false) {
-        void fetchPermissions(permissions).catch(() => { /* fail-open：权限预取失败不阻塞启动 */ })
+        // 🔴 与守卫同一入口：预取 + 失败归因（同一 URL 同一会话只告警一次）
+        void ensurePermissions(permissions).catch(() => { /* fail-open：权限预取失败不阻塞启动 */ })
       }
     },
 

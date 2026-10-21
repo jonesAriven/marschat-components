@@ -550,6 +550,284 @@ export function resolvePermissionsIssuer(
   return proxy || issuer
 }
 
+/**
+ * 权限探针失败的**可归因告警**（0.1.8，坑 #43）。
+ *
+ * 🔴 缺陷背景（2026-10-20 R12 实测；与坑 #41 属同一类「不报错、悄悄失效」）：
+ * 权限体系是 **fail-open** 设计 —— `fetchPermissions()` 一旦失败
+ * （网络错误 / 非 2xx / 非 JSON / 权限点不是数组 / 业务码非 200），
+ * `configured` 即被置为 `false` ⇒ **菜单级与按钮级限制全部静默放行**，
+ * 而控制台**没有任何可归因输出**：没有 URL、没有状态码、没有失败原因，
+ * 也没有一句「现在已经全放行了」。
+ * 已知 kb-ops 正因跨域直连 `https://auth.marschat.online/auth/permissions` 恒 403
+ * 而长期处于该状态（该应用双通道断裂已单列 T-ENG-17，跨仓修复不在本包范围）。
+ *
+ * 0.1.7 已用「判定 + 文案纯函数化」治好运行时配置的静默回落（坑 #41）；
+ * 本轮把**同一套**可归因能力原样套到权限探针上 —— 同类缺陷的最后一块。
+ *
+ * ⚠️ **只改可见性，不改语义**：产出物只有一条 `console.warn`，
+ *    **不拦截、不跳转、不抛错**，fail-open 行为逐字保留。
+ */
+
+/** 权限探针（GET `${issuer}/auth/permissions?client=<clientId>`）的失败归因。 */
+export type PermissionsFailureReason =
+  /** `fetch` 本身抛错 —— 含 CORS 跨域被拦（浏览器侧表现为 `Failed to fetch`），最常见。 */
+  | 'network-error'
+  /** HTTP 状态非 2xx（403 = 浏览器持 OIDC RS256 令牌直连中心的 HS384 端点，恒 403）。 */
+  | 'http-not-200'
+  /** 2xx 但响应体为空（空串 / 纯空白 / `null` / 缺 `data`）。 */
+  | 'empty-body'
+  /** 2xx、JSON 合法，但权限点**不是数组**（对象 / 字符串 / 数字）。 */
+  | 'not-an-array'
+  /** 2xx 但响应体不是合法 JSON（SPA try_files 回的 index.html、网关 HTML 错误页、纯文本）。 */
+  | 'parse-error'
+  /** 2xx、JSON 合法，但业务码 `code !== 200`（auth-components 同样判失败）。 */
+  | 'business-error'
+  /** 归因不到（含「其实没失败」—— 本函数只在失败路径被调用，走到这里多半是调用方误用）。 */
+  | 'unknown'
+
+/** 权限探针响应的最小契约（`Response` 与测试假实现都满足）。 */
+export interface PermissionsResponseLike {
+  /** HTTP 状态码；请求本身抛错时没有这个对象。 */
+  status?: number
+  /** `Response.ok`；不传时按状态码是否落在 2xx 判定。 */
+  ok?: boolean
+  /** 响应体（可选；第三个入参 `body` 优先于它）。 */
+  body?: unknown
+}
+
+/** 一次权限探针**失败**的记录 —— 告警文案的唯一数据源。 */
+export interface PermissionsAttempt {
+  /** 完整请求地址（含 `?client=`），便于直接贴进浏览器地址栏复核。 */
+  url: string
+  /** HTTP 状态码；请求本身抛错时为 0。 */
+  status: number
+  /** 失败归因。 */
+  reason: PermissionsFailureReason
+}
+
+/** fail-open 后果说明 —— 告警文案里**必须出现**的那一句（可注入覆盖）。 */
+export const PERMISSIONS_FAIL_OPEN_CONSEQUENCE =
+  '权限体系已 fail-open：菜单/按钮级限制全部放行，写接口硬闸门不受影响'
+
+/**
+ * 权限探针的完整请求地址 —— 与 `auth-components` 的 `fetchPermissions` **逐字同口径**。
+ *
+ * ⚠️ 拼装口径（`usePermissions.ts` 原文）：
+ *    `${opts.issuer.replace(/\/+$/, '')}/auth/permissions?client=${encodeURIComponent(opts.clientId)}`
+ *    告警里贴的 URL 必须**就是**它真正请求的那一个，否则排查会把人带到错误的地址上
+ *    （历史教训：0.1.6 曾把基址误取 `authApiBase` ⇒ 拼出 `/api/auth/auth/permissions`）。
+ */
+export function buildPermissionsUrl(issuer?: string | null, clientId?: string | null): string {
+  const base = String(issuer ?? '').replace(/\/+$/, '')
+  return `${base}/auth/permissions?client=${encodeURIComponent(String(clientId ?? ''))}`
+}
+
+/**
+ * 判定「权限探针失败」的**具体归因**（纯函数，不抛异常）。
+ *
+ * 判据顺序（与 `auth-components` 的 `fetchPermissions` 成功条件逐条对应）：
+ *   ① `fetch` 抛错 ⇒ `network-error`；② 连响应对象都没有 ⇒ `unknown`；
+ *   ③ 非 2xx ⇒ `http-not-200`；④ 之后只看响应体（空 / 非法 JSON / 业务码 / 权限点形态）。
+ *
+ * @param err `fetch` 抛出的异常（CORS 被拦也走这里）
+ * @param response 响应对象的最小契约；`null` / 缺省表示请求根本没到达服务端
+ * @param body 响应体（字符串或已解析的对象）；缺省时回退到 `response.body`
+ * @returns `'unknown'` 表示「HTTP 与响应体都正常 ⇒ 其实没失败」（调用方据此不告警）
+ */
+export function classifyPermissionsFailure(
+  err?: unknown,
+  response?: PermissionsResponseLike | null,
+  body?: unknown,
+): PermissionsFailureReason {
+  // ① fetch 抛错（含 CORS 被拦）⇒ 请求根本没到服务端，与 HTTP 状态无关
+  if (err !== undefined && err !== null) {
+    return 'network-error'
+  }
+  // ② 连响应对象都没有 ⇒ 无从归因（既不怪网络也不怪服务端）
+  if (!response) {
+    return 'unknown'
+  }
+  // ③ HTTP 状态非 2xx（403 / 404 / 500 都归这里）
+  const status = Number(response.status ?? 0)
+  const statusKnown = response.status !== undefined
+  const statusOk = !statusKnown || (status >= 200 && status < 300)
+  const ok = response.ok === undefined ? statusOk : response.ok !== false
+  if (!ok || !statusOk) {
+    return 'http-not-200'
+  }
+  // ④ HTTP 成功 —— 只看响应体（第三个入参优先）
+  return classifyPermissionsPayload(body !== undefined ? body : response.body)
+}
+
+/** 响应体归因（字符串先剥空白再 `JSON.parse`，其后按 `{ code, data }` 信封判）。 */
+function classifyPermissionsPayload(payload: unknown): PermissionsFailureReason {
+  let value: unknown = payload
+  if (typeof value === 'string') {
+    const text = value.trim()
+    if (text === '') {
+      return 'empty-body'
+    }
+    try {
+      value = JSON.parse(text) as unknown
+    } catch {
+      return 'parse-error'
+    }
+  }
+  if (value === undefined || value === null) {
+    return 'empty-body'
+  }
+  // 后端直接回权限点数组 —— 合法形态，未失败
+  if (Array.isArray(value)) {
+    return 'unknown'
+  }
+  if (typeof value !== 'object') {
+    return 'not-an-array'
+  }
+  const envelope = value as Record<string, unknown>
+  // 业务码：`fetchPermissions` 的成功条件是 `body.code === 200 && body.data`
+  const code = envelope.code
+  if (code !== undefined && code !== null && Number(code) !== 200) {
+    return 'business-error'
+  }
+  const data = envelope.data
+  if (data === undefined || data === null) {
+    return 'empty-body'
+  }
+  if (Array.isArray(data)) {
+    return 'unknown'
+  }
+  if (typeof data !== 'object') {
+    return 'not-an-array'
+  }
+  const inner = data as Record<string, unknown>
+  const permissions = inner.permissions
+  if (permissions === undefined || permissions === null) {
+    // 没有 permissions 字段时：`configured === false` 是「应用确实没配权限点」的**正常**形态，
+    // 不是失败；反过来（声称 configured=true 却没有权限点数组）才是真失败。
+    return inner.configured === false ? 'unknown' : 'empty-body'
+  }
+  if (!Array.isArray(permissions)) {
+    return 'not-an-array'
+  }
+  return 'unknown'
+}
+
+/** 失败归因 → 中文说明。 */
+const PERMISSIONS_REASON_TEXT: Record<PermissionsFailureReason, string> = {
+  'network-error': '请求未到达服务端（fetch 直接抛错：跨域 CORS 被拦 / 网络不可达）',
+  'http-not-200': 'HTTP 状态非 2xx（403 常见于浏览器跨域直连中心 /auth/permissions —— '
+    + '浏览器持 OIDC RS256 令牌，而该端点校验 HS384 业务令牌）',
+  'empty-body': '响应体为空（2xx 但没有任何内容，或缺少 data）',
+  'not-an-array': '权限点不是数组（2xx 且 JSON 合法，但 permissions 字段不是数组）',
+  'parse-error': '响应体不是合法 JSON（多半是 SPA try_files 回的 index.html 或网关 HTML 错误页）',
+  'business-error': '业务码非 200（HTTP 通了，但权限接口返回失败码）',
+  'unknown': '失败原因未能归因（请在浏览器 Network 面板复核该请求）',
+}
+
+/**
+ * 把一次失败的权限探针拼成**一条**可操作的中文告警（纯函数）。
+ *
+ * 文案四要素：① 请求 URL；② 中文失败原因；③ HTTP 状态（拿不到时明说）；
+ * ④ **后果说明** —— 「已 fail-open 全放行」这句才是让人知道「现在是裸奔」的关键。
+ *
+ * @returns `attempt` 为空或 URL 为空时返回**空字符串**（调用方据此跳过日志）
+ */
+export function formatPermissionsWarning(
+  attempt: PermissionsAttempt,
+  consequence?: string,
+): string {
+  if (!attempt || !attempt.url) {
+    return ''
+  }
+  const reason = PERMISSIONS_REASON_TEXT[attempt.reason] ?? PERMISSIONS_REASON_TEXT.unknown
+  const status = Number(attempt.status ?? 0)
+  const statusText = status > 0 ? `（HTTP ${status}）` : '（未拿到 HTTP 响应）'
+  const effect = consequence && consequence.length > 0
+    ? consequence
+    : PERMISSIONS_FAIL_OPEN_CONSEQUENCE
+  return [
+    `[marschat-app-kit] 权限探针失败：GET ${attempt.url}`,
+    `失败原因：${reason}${statusText}。`,
+    `后果：${effect}。`,
+    '排查：① 确认该地址是**同源代理**（应为 `${apiBase}/auth/permissions`），'
+      + '不要跨域直连 auth-center；② 确认后端已为该应用登记权限点'
+      + '（未登记时 configured=false 属正常，同样全放行）；'
+      + '③ 在浏览器 Network 面板复核上面这个 URL 的状态码与响应体。',
+  ].join('\n')
+}
+
+/** 去重集合的最小契约（`Set<string>` 天然满足，便于测试注入假实现）。 */
+export interface PermissionsWarnDedupe {
+  has(key: string): boolean
+  add(key: string): void
+}
+
+/**
+ * 模块级去重集合 —— **同一次页面会话内，同一 URL + 同一原因只告警一次**。
+ *
+ * 🔴 为什么必须有：权限探针会被**路由守卫每次导航**与 `bootstrap()` 各触发一次，
+ * 一个会话几十次导航 ⇒ 几十条一模一样的告警 ⇒ 控制台被刷爆，
+ * 反而把真正该看的那一条淹掉（与 0.1.7「运行时配置只告警一条」是同一理由）。
+ */
+const DEFAULT_PERMISSIONS_WARNED = new Set<string>()
+
+/** 造一个独立的去重集合（测试 / 多实例场景注入用）。 */
+export function createPermissionsWarnDedupe(): PermissionsWarnDedupe {
+  return new Set<string>()
+}
+
+/** 清空模块级去重集合（**仅供测试隔离**，生产不需要调用）。 */
+export function resetPermissionsWarnDedupe(): void {
+  DEFAULT_PERMISSIONS_WARNED.clear()
+}
+
+/** 去重键 = 原因 + URL（同一 URL 换了一种失败原因，仍应各告警一次）。 */
+export function permissionsWarnKey(attempt: PermissionsAttempt): string {
+  return `${attempt?.reason ?? 'unknown'}@${attempt?.url ?? ''}`
+}
+
+/** 告警出口选项（全部可注入，便于零依赖单测）。 */
+export interface PermissionsWarnOptions {
+  /** 去重集合；缺省模块级单例。 */
+  dedupe?: PermissionsWarnDedupe
+  /** 日志出口；缺省 `console.warn`。 */
+  log?: (message: string) => void
+  /** 后果说明覆盖；缺省 `PERMISSIONS_FAIL_OPEN_CONSEQUENCE`。 */
+  consequence?: string
+}
+
+/** 默认日志出口（无 `console` 的环境静默跳过，绝不因打日志而抛错）。 */
+function defaultPermissionsWarnLog(message: string): void {
+  if (typeof console !== 'undefined' && typeof console.warn === 'function') {
+    console.warn(message)
+  }
+}
+
+/**
+ * 输出一条权限探针失败告警（**同 URL + 同原因只输出一次**）。
+ *
+ * @returns 本次是否真的输出了告警（`false` = 被去重拦下 / 文案为空 ⇒ 调用方无需再处理）
+ */
+export function warnPermissionsFailure(
+  attempt: PermissionsAttempt,
+  options: PermissionsWarnOptions = {},
+): boolean {
+  const message = formatPermissionsWarning(attempt, options.consequence)
+  if (!message) {
+    return false
+  }
+  const dedupe = options.dedupe ?? DEFAULT_PERMISSIONS_WARNED
+  const key = permissionsWarnKey(attempt)
+  if (dedupe.has(key)) {
+    return false
+  }
+  dedupe.add(key)
+  const log = options.log ?? defaultPermissionsWarnLog
+  log(message)
+  return true
+}
+
 /** 站内绝对路径（带部署前缀），用于跨页跳转与 SLO 回跳。 */
 export function appUrl(config: Pick<ResolvedAppConfig, 'contextPath'>, path: string, origin = ''): string {
   const base = baseFragment(config.contextPath)

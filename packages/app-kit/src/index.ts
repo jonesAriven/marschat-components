@@ -25,12 +25,19 @@
  * </pre>
  * + 一份 `bff-whitelist.yml`。
  */
-export { createMarschatApp, readRuntimeConfig } from './createMarschatApp'
+export { createMarschatApp, readRuntimeConfig, ensurePermissions } from './createMarschatApp'
 export {
   runtimeConfigCandidates,
   parseRuntimeConfig,
   formatRuntimeConfigWarning,
   loadRuntimeConfig,
+  buildPermissionsUrl,
+  classifyPermissionsFailure,
+  formatPermissionsWarning,
+  warnPermissionsFailure,
+  createPermissionsWarnDedupe,
+  resetPermissionsWarnDedupe,
+  PERMISSIONS_FAIL_OPEN_CONSEQUENCE,
 } from './config'
 export { createMarschatShell, SHELL_CSS } from './shell'
 export type { ShellOptions } from './shell'
@@ -52,6 +59,11 @@ export type {
   RuntimeConfig,
   RuntimeConfigAttempt,
   RuntimeConfigFailureReason,
+  PermissionsAttempt,
+  PermissionsFailureReason,
+  PermissionsResponseLike,
+  PermissionsWarnDedupe,
+  PermissionsWarnOptions,
   ResolvedAppConfig,
   TokenKeys,
   SessionMode,

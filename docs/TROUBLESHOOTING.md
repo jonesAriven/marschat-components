@@ -873,3 +873,76 @@ HTTP 状态非 200（该地址下没有 app-config.json）
 ```
 
 esbuild 生产构建会**改写函数名**但不动字符串字面量，所以签名串稳定可查（§13.4 的教训反过来用：不能数函数名，但可以数字符串）。本轮实测：**五应用在线 chunk 均含全部签名** —— portal `main.marschat.online/portal/assets/index-7xfla58k.js`、kb-web `kb.marschat.online/kb/s/assets/index-CZTSAPiD.js`、kb-ops `kb.marschat.online/ops/assets/index-6dfHHtUi.js`、infra `monitor.marschat.online/infra/assets-v2/index-DHJXEVRp.js`、cosmic `cosmic.marschat.online/assets/index-url5nkxf.js`。
+
+---
+
+## 14. 🔴 P0 环境故障：单主模式下 node1 被网络抖动逐出 → 以 SECONDARY 回归 → 六应用 SSO 全线 500（2026-10-20 夜）
+
+> 与 §10（10-18 数据分歧）**并列的第二种集群失效形态**。共同点是「六应用 SSO 全 500」，但**根因与处置都不同** —— 先做 30 秒定性再选路径。
+
+### 14.1 30 秒定性（先跑这条）
+
+```bash
+docker exec platform-mysql-1 mysql -uroot -p<密码> -N \
+  -e "SELECT @@read_only,@@super_read_only; SELECT MEMBER_HOST,MEMBER_PORT,MEMBER_STATE,MEMBER_ROLE FROM performance_schema.replication_group_members;"
+# read_only=1 super_read_only=1        ⇒ 本节点只读
+# 且本节点 MEMBER_ROLE=SECONDARY       ⇒ 主漂走了 —— 本节
+# 若本节点 MEMBER_STATE=ERROR / 已离组 ⇒ 转 §10 或 MySQL 官方文档 20.5.2
+```
+
+> 📌 该集群现在是**单主**模式（2026-10-20 09:10 切换，`performance_schema.persisted_variables` 中 `group_replication_single_primary_mode=ON`）。
+> §10 写作时是多主（三节点都显示 `PRIMARY` 曾属正常），**两边的判据不能混用**。
+
+### 14.2 本次实际时序（23:35–23:47 CST）
+
+| 时刻 | 事件 |
+|---|---|
+| 23:35:16 | node1 同时连不上 node2/node3（`has become unreachable`），74ms 后恢复；但 GR 已判逐出：`Member was expelled from the group due to network failures` |
+| 23:35:31 | `Transaction cannot be executed while Group Replication is on ERROR state` + `The server was automatically set into read only mode after an error was detected` ⇒ `super_read_only=ON` |
+| 23:36:01–36 | auto-rejoin 第 1 次**成功**并入组（`This server was declared online within the replication group`）⇒ **但身份是 SECONDARY**（主已是 node2） |
+| 23:36 起 | 应用侧成片报 `The MySQL server is running with the --super-read-only option ... error code [1290]`，六应用 SSO 全线 **500** |
+
+**为什么这次比 10-18 更隐蔽**：数据库 ping 得通、`docker ps` 全 Up、HTTP 是 500 而不是连不上 —— 从应用视角只能看到「认证坏了」，看不出「你连的那台机器已经不当主了」。
+
+### 14.3 根因（三要素相乘）
+
+1. **网络**：`192.168.31.105 ↔ 192.168.31.182` 一次约 74ms 的抖动（不是断网）
+2. **集群模式**：此时已是**单主模式** ⇒ 被逐出的成员回来只能做副本
+3. **应用连接**：所有应用数据源指向 `MYSQL_HOST=platform-mysql`（= 105:3306），**没有多地址 failover**（唯一例外：activecode 用三地址 LB）
+
+⇒ **多主模式下「node1 回归 = 恢复可写」；单主模式下「node1 回归 = 仍然只读」** —— 这是切换单主之后新引入的失效形态。
+
+### 14.4 处置（本次采用，零数据丢失）
+
+```bash
+# ① 先验三节点 GTID 逐字符相同（不同就不能随便切主，转 §10）
+docker exec platform-mysql-1 mysql -uroot -p<密码> -N -e "SELECT @@gtid_executed;"
+docker exec platform-mysql-1 mysql -uroot -p<密码> -h 192.168.31.182 -P 3307 -N -e "SELECT @@gtid_executed;"
+docker exec platform-mysql-1 mysql -uroot -p<密码> -h 192.168.31.182 -P 3308 -N -e "SELECT @@gtid_executed;"
+
+# ② 在【当前 PRIMARY】上把主迁回 node1（uuid 取 node1 的 @@server_uuid）
+docker exec platform-mysql-1 mysql -uroot -p<密码> -h 192.168.31.182 -P 3307 \
+  -N -e "SELECT group_replication_set_as_primary('09a2a7b2-7d4c-11f1-9e75-7ac91537f639');"
+# 返回：Primary server switched to: <uuid>
+
+# ③ 验证必须「看写」，不能只看容器 Up
+curl -s -X POST http://127.0.0.1:8085/auth/login \
+  -H 'Content-Type: application/json' -d '{"username":"admin","password":"admin123"}'
+# 出现 refreshToken 才算真恢复
+```
+
+⚠️ **不要 bootstrap** —— 会造出第二个同名组（2026-09 已踩过）。GTID 相同 ⇒ 直接 `set_as_primary` 即可。
+
+### 14.5 根子还没除（下次网络抖动会原样复发）
+
+| 待办 | 说明 |
+|---|---|
+| ① **`SET PERSIST` 周期雷** | `single_primary_mode=ON` 写在数据卷的 `mysqld-auto.cnf`（不在 git、也不在 bind-mount 配置里），重启会重放、也会随数据卷迁移。应 `RESET PERSIST IF EXISTS group_replication_single_primary_mode` 后落到配置真源 `/mnt/shared/platform/mysql/`（并遵守 `T-ENG-14` 的「共享盘 + 182 本地双写」约定） |
+| ② **应用侧单点写** | 5/6 应用数据源只指向 105:3306。治本 = 改多地址（照 activecode 的三地址 JDBC）或前面挂 VIP / 代理，属跨仓改造，需单独排期 |
+| ③ **缺主动告警** | 目前这种故障**没有任何主动告警**，全靠「用户登不进去」被动发现。建议给 `@@read_only=1` 加一条 Uptime-Kuma / Prometheus 告警 |
+
+### 14.6 排查心法
+
+> **多应用同时报认证 500，先花 10 秒查 `SELECT @@read_only`，再翻组件代码。**
+> 本平台两次在夜里先翻了一小时组件代码，根因都在数据库集群。
+> **分支判据**：`read_only=1` + `MEMBER_ROLE=SECONDARY` ⇒ 本节；`MEMBER_STATE=ERROR` 或已离组 ⇒ §10。
