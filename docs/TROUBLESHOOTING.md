@@ -1073,3 +1073,29 @@ cosmic #126 在 API 镜像构建时拉 `python:3.12-slim` 两个层（12MB/30MB�
 **复验（R15-O/P，headless 真浏览器，全绿）**：探针**同源 200 + `configured=true` + 权限点数组**（qa 仅 `marschat-kbops:menu:dashboard`）；**零跨域 `/auth/permissions`**（邮箱 + SSO 冷缓存双流，CDP 层实证 cross=[]）；**零 `[marschat-app-kit]` 告警**；**权限真正生效** —— qa 账号侧边菜单**仅「看板」**（修复前 fail-open 全量渲染）；业务端点无回归（`/ops-api/ops/dashboard` 200、越权 `/ops-api/ops/host/list` 403 = 正确执行）；SPA 200。
 
 **防复发口径（同源权限代理三要素，缺一即 fail-open）**：① **组件侧**：`permissionsIssuer`/缺省策略走同源 `apiBase`（app-kit ≥0.1.3 已内建）；② **部署侧**：`{apiBase}/auth/**` 必须路由到认证中心（新增/改造应用时与前端 apiBase 同步设计，**别忘了 nginx/gateway 这一层**）；③ **应用侧**：`grep -rn "fetchPermissions(permOptions)" src/` —— MainLayout 等遗留活跃调用点的 `permOptions.issuer` 必须同源（共享 60s 缓存会让它在前端无感时补发跨域请求）。**验收判据**：登录后 CDP 层 `/auth/permissions` 请求**零跨域**、带票 200、`configured=true`、非超管账号菜单按权限点收窄。
+
+---
+
+## §18 · 坑 #49：PyMySQL 无原生多地址 —— GR 集群应用层 failover 自建三件套（R16）
+
+**现象**：R13 故障（GR 主库从 105 漂到 182:3307）时六应用 SSO 全线 500（`error code [1290] super-read-only`）。R14/R15 排查发现 Java 侧 8 服务早已是 Connector/J 三地址 failover（`loadBalanceStrategy=random&failOverReadOnly=false`，auth-center 线上日志实证 `FailoverConnectionProxy`），**唯独 cosmic-api（Python/PyMySQL）仍是 `DB_HOST` 单地址 105:3306** —— 主漂移后它的写全部 1290，是应用侧最后一个单点。
+
+**根因**：PyMySQL/MySQLdb **没有** Connector/J 那样的多地址负载均衡与 failover（SQLAlchemy 也不支持 host 列表），单 `host=` 参数直连，连不上就是连不上、连到从库就是连到从库（GR 单主模式下从库连接成功、写才报错）。
+
+**修法（cosmic-studio `275d600`，R16）**——应用层自建三件套：
+
+1. **候选枚举**：`config.py` 新增 `DB_HOSTS`（逗号分隔 `host:port`），`DB_HOST` 单地址保留作 dev 兼容；compose env 配三成员全枚举。
+2. **建连候选 + 落点标记**：`connect(db, exclude=None)` 按候选逐个 `pymysql.connect`，成功即在连接上打 `conn._mc_host = (host, port)`；全部失败抛最后一个异常。
+3. **写时 1290 自愈**：`execute`/`executemany` 捕获异常后判 `_is_super_readonly_err`（str 含 `1290`/`super-read-only`），自动把当前落点加入 `excluded` 换候选重连重试（有界：最多试完候选）；`tx` 入口先 `SELECT @@super_read_only`，抽到 SECONDARY 直接换节点，保证事务全程在 PRIMARY（**事务中途不换节点**——跨节点事务上下文必丢，中途 1290 直接抛给调用方）。
+
+**实测（R16-T，cosmic-api 容器内真集群 6/6）**：T0 基准（105=PRIMARY，182:3307/3308=SECONDARY）· T1 读 · **T2 写自愈（候选从库打头，182:3307→3308→105 连续切换落 PRIMARY）** · T3 tx 可写探测 · T4 首位不可达节点跳过 · T5 单地址兼容。R16-U 浏览器 9/9（登录/业务页/Console 零错/零 5xx/零 CORS）；服务端 15min 日志零 1290。
+
+**踩过并修掉的三个实现坑（复现同类改造时直接避开）**：
+
+- **重试边界差一**：`len(excluded) < len(DB_HOSTS) - 1` 会在「还剩最后一个候选」时误判为无候选可试直接 raise——必须是 `< len(DB_HOSTS)`。
+- **`_acquire` 池路径必须过 exclude**：换节点重试时若只给「新建连接」路径传 exclude，连接池里**落在被排除节点的旧连接会被原样取出复用**，重试打回同一个从库无限失败。池取到连接后也要判 `_mc_host in exclude` 并丢弃。
+- **`finally` 与 `continue` 的交互**：`try/except/finally` 里 `continue` 后 finally 照样执行——坏连接必须先 `_discard`（close 且 `open=False`），finally 据此跳过归还；成功路径的 `_release` 要么放 `return` 前，要么靠 finally + open 检查，**别写 try 里 return、finally 外又跟一行不可达的 `_release`**（连接静默泄漏）。
+
+**顺带的测试环境教训**：mykng 上连续多轮 headless chromium 不退出会累积（实测 32 进程/9G 内存）导致新实例 `chromium not ready`；排查先 `ps aux | grep -c 'chromi[u]m'` + `free -m`，`pkill -f 'user-data-dir=<profile>'` 精准清（**模式串带方括号防自伤**）。另：`launch_retry` 会真起 chromium 且占用同名 profile 的 Singleton 锁——单线跑验证不要先调它再 `newpage` 同 profile，直接唯一 profile 名（带时间戳）即可。
+
+**防复发口径**：① 新应用接 GR 集群时，**无论语言**先回答「数据源是否单地址」——Java 用 Connector/J 三地址 + `failOverReadOnly=false`，Python 用本坑三件套（或 ProxySQL/MySQL Router，但那要动部署栈需单独拍板）；② 验收判据 = **候选列表首位故意配成 SECONDARY/不可达地址**，读正常、写自动落 PRIMARY（真集群实测，不是单测 mock）；③ 数据库侧 `single_primary_mode` 复发雷（SET PERSIST 写进数据卷）不在本坑范围，属 T-ENG-19 待良哥拍板项。
