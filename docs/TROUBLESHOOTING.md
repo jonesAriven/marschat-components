@@ -1102,11 +1102,13 @@ cosmic #126 在 API 镜像构建时拉 `python:3.12-slim` 两个层（12MB/30MB�
 
 ---
 
-## 19. GR 单主固化后的三处配置不一致（R17 只读取证，2026-10-22）
+## 19. GR 单主固化后的三处配置不一致（R17 取证 → R18 执行闭环，2026-10-22）
 
 > **前置定性**：切单主是 **ADR-2026-10-21 的既定决策**（良哥诉求「一台 sql 挂了，可以自动切到另外一台」），10-20 09:10 运行时切换 + 10-20 12:23 配置固化，**不是漂移**。STATUS/T-ENG-19 原「`single_primary_mode=ON` 是 SET PERSIST 写进数据卷的周期复发雷、建议 RESET PERSIST」表述**据此作废**。本节记录 R17 全量只读取证发现的**固化残留**——全部是「配置文件与运行时不一致」形态，当前被 persist 掩盖、集群健康（3/3 ONLINE · node1=PRIMARY 可写 · node2/3 `super_read_only=1`），但构成**重建/重启类操作的雷**。按调试边界铁律，R17 全程只读、**未动任何数据库配置**。
+>
+> ✅ **R18（10-22 20:26–21:10，良哥授权「1、2 做，3 选 A，4 也做」）四项已全部执行并验收通过**（persisted=0 ×3 · 三节点 gtid MD5 一致 · 写探针主从全通 · 应用 HTTP 200）。执行实录与验收数据见 **19.7**；19.1–19.4 各节末尾均有「R18 已执行」标注。
 
-### 19.1 现场事实（2026-10-22 19:4x 实测，三节点）
+### 19.1 现场事实（R17 只读，2026-10-22 19:4x 实测，三节点；R18 执行后状态见 19.7）
 
 | 项 | node1（105:3306） | node2（182:3307） | node3（182:3308） |
 |---|---|---|---|
@@ -1129,19 +1131,22 @@ cosmic #126 在 API 镜像构建时拉 `python:3.12-slim` 两个层（12MB/30MB�
 - **当前为何还健康**：persist 的 OFF **覆盖**配置文件的 ON（persist 优先于 my.cnf），三节点运行时一致 OFF。
 - **何时爆**：① 任一节点**数据卷全新初始化**（clone 会连 donor 的 persist 一并带走、暂时掩盖；全新 init 则直接吃配置文件的 ON）⇒ 无法入组；② 有人按 ADR-2026-10-21 §4 的纪律执行 `RESET PERSIST`（该 ADR 明令禁用 SET PERSIST 固化）⇒ persist 拆除后重启即吃配置 ON ⇒ 同样无法入组。**ADR 自带的整改动作，在当前配置文件下会把集群弄坏** —— 这是本节最尖锐的结论。
 - **修法（零运行时影响）**：5 个文件（共享 `cluster.cnf`/`node2.cnf`/`node3.cnf` + 182 本地 my.cnf ×2）的 `group_replication_enforce_update_everywhere_checks` 改 `OFF` 或**删行**（默认即 OFF）。只影响未来重启/重建，**不动当前运行**。
+- ✅ **R18 已执行**：`cluster.cnf` 由 sed 精确替换为 OFF；`node2/3.cnf` 按「本地运行真相」整体重写为 OFF（见 19.7）；182 本地两份 my.cnf 的 enforce 同步改 OFF 后被软链替换（本地文件退场为备份）。**验收**：三节点重启后运行时 `enforce=OFF` 且来源为配置文件（persist 已清零），非 persist 兜底。
 
 ### 19.3 问题二：🟠 `start_on_boot` 三方不一致，node1 的 T-ENG-14 修复已不在
 
 - T-ENG-14 曾把 node1 `start_on_boot` 改 **ON**（rationale：node1 是所有应用的写入点，重启后不自动入组 = 「孤立但可写」温床，正是 T-ENG-13 分歧事故的形态）。
 - **现状**：node1 共享 cluster.cnf = **OFF**（10-20 12:23 随单主固化重写文件时回退；两份备份显示 10-19 07:40 的 ON 修复在 10-20 12:23 前已不在）；node2/3 **本地** my.cnf = ON；共享 node2/3.cnf（未被使用）= OFF。**最差组合：唯一写入点 node1 不自动入组，两个从库自动入组。**
-- **权衡（需良哥拍板）**：**ON** = 崩溃/重启后自动重新入组、消除孤立可写岛（T-ENG-14 立场）；**OFF** = 契合官方 20.5.2 冷启流程（先 bootstrap 再逐个 `START GROUP_REPLICATION`，`infra-mysql.md` 明令禁止全量 ON 重启——无引导者会全失败）。补充事实：单主模式下 node1 重启不入组时，node2+node3 仍占多数（2/3）可正常选主，应用侧 JDBC 三地址 failover（R16 已闭环）接管写 ⇒ **「挂一台自动切」不依赖 node1 重新入组**；但重新入组前 node1 是孤立可写岛，JDBC random 仍可能把连接打进去写 ⇒ 分歧风险。
+- **权衡（良哥已拍板：选 ON，R18 执行）**：**ON** = 崩溃/重启后自动重新入组、消除孤立可写岛（T-ENG-14 立场）；**OFF** = 契合官方 20.5.2 冷启流程（先 bootstrap 再逐个 `START GROUP_REPLICATION`，`infra-mysql.md` 明令禁止全量 ON 重启——无引导者会全失败）。补充事实：单主模式下 node1 重启不入组时，node2+node3 仍占多数（2/3）可正常选主，应用侧 JDBC 三地址 failover（R16 已闭环）接管写 ⇒ **「挂一台自动切」不依赖 node1 重新入组**；但重新入组前 node1 是孤立可写岛，JDBC random 仍可能把连接打进去写 ⇒ 分歧风险。
+- ✅ **R18 已执行**：node1 `cluster.cnf` 的 `group_replication_start_on_boot` 由 OFF 改 **ON**（三节点口径统一为 ON：node2/3 经 19.7 的共享副本同步后亦为 ON）。**已知代价（接受并记录）**：整机冷启（三容器同时起）时无引导者，需人工按官方 20.5.2 流程引导一次（mysql-gr-ops §2 纪律）；节点级 `docker restart` 不受影响（R18 三个节点逐个重启全部自动入组成功）。
 - ⚠️ 附带：182 的 `docker-compose.mysql-cluster.debian.yml` **指向共享 node2/3.cnf**，而运行中的 node2/3 挂 182 本地（T-ENG-14「未修」项仍在）——**下次在 182 用该 compose 重建 node2/3，它们将吃到共享副本的 `start_on_boot=OFF`**，与现行本地 ON 的行为发生变化。
 
 ### 19.4 问题三：🟡 node2/3 挂载与共享配置真源分裂（T-ENG-14 未修项延续）
 
 - 共享盘 `/mnt/shared/platform/mysql/` 有全套 `cluster/node2/node3.cnf`（10-20 同步为单主态）；**node2/3 运行中不读它们**，读 182 本地 my.cnf。「改共享盘对 node2/3 无效」的根因仍在。
 - 且共享副本与本地副本**已不一致**：`start_on_boot` 共享=OFF vs 本地=ON；`enforce` 双方都 ON（相悖）。
-- **修法二选一（需拍板）**：**A** 182 改用 debian compose 挂共享 node2/3.cnf（需先把共享副本的 `start_on_boot` 定下来，避免 19.3 的附带风险）；**B** 明确「182 本地为 node2/3 真源」，共享 node2/3.cnf 删除或加显著注释防误用。
+- **修法二选一（良哥已拍板：选 A，R18 执行）**：**A** 182 改用 debian compose 挂共享 node2/3.cnf（需先把共享副本的 `start_on_boot` 定下来，避免 19.3 的附带风险）；**B** 明确「182 本地为 node2/3 真源」，共享 node2/3.cnf 删除或加显著注释防误用。
+- ✅ **R18 已执行（方案 A 的降险变体）**：**不做容器重建**（docker rm+run 有参数复制出错风险，且 debian compose 声明的卷名带 `mysql-cluster_` 项目前缀、与实际卷 `platform-mysql-{2,3}-data` 不符，直接 `compose up` 会挂**空卷**初始化全新 datadir —— 该雷已拆，见 19.7）。实际做法：共享 `node2/3.cnf` 按本地运行真相重写（规范化 diff 证实仅 enforce 一行差异）⇒ 182 本地 my.cnf **替换为指向共享文件的绝对软链** ⇒ `docker restart` 时内核重新解析软链，容器实际读共享真源（重启后进容器 `cat /etc/mysql/conf.d/my.cnf` 已验证读到共享文件头）。debian compose 的 volumes 声明改 `external: true`（复用现有卷、缺卷即报错而非静默新建空卷），其 my.cnf 挂载本就指向共享 ⇒ compose 路径与运行路径从此同源。
 
 ### 19.5 取证命令（复制即用）
 
@@ -1157,9 +1162,39 @@ docker exec platform-mysql-1 cat /var/lib/mysql/mysqld-auto.cnf
 docker inspect platform-mysql-1 --format '{{range .Mounts}}{{.Source}} -> {{.Destination}}{{println}}{{end}}'
 ```
 
-### 19.6 待拍板（收敛为 `STATUS.md` T-DEC-5 四项）
+### 19.6 执行记录（原「待拍板」四项，R18 已全部执行）
 
-1. **`enforce=ON` → OFF**（5 个配置文件；单主模式官方要求 OFF，joiner 值不符无法入组；零运行时影响，**优先做**）
-2. **node1 `start_on_boot`** OFF→ON（恢复 T-ENG-14 修复）或维持 OFF（官方冷启流程），并统一三节点口径
-3. **node2/3 挂载对齐**（19.4 的 A/B 二选一）
-4. **维护窗口**：`RESET PERSIST` + 整组重启，让配置文件成为唯一真源（**必须先完成 1**，否则重启后节点无法入组）
+1. ✅ **`enforce=ON` → OFF**（R18 完成）—— `cluster.cnf` sed 替换；`node2/3.cnf` 按本地运行真相重写为 OFF；182 本地两份 my.cnf 同步改 OFF 后软链退场。零运行时风险，重启后由配置文件供值。
+2. ✅ **node1 `start_on_boot` OFF→ON**（R18 完成，良哥选 ON 口径）—— 三节点统一 ON；已知代价 = 整机冷启需人工引导（mysql-gr-ops §2），节点级 restart 无感。
+3. ✅ **node2/3 挂载对齐共享真源**（R18 完成，良哥选 A，降险变体 = 软链替换，见 19.4/19.7）—— 运行容器与 debian compose 从此同读共享文件；compose 空卷雷已拆。
+4. ✅ **`RESET PERSIST` + 整组顺序重启**（R18 完成，良哥授权「4 也做」）—— 三节点 persist 清零后按 node2→node3→node1 逐个重启（官方纪律：严禁同时重启），主位经 Paxos 自动漂移后 `set_as_primary` 切回 node1。**配置文件成为唯一真源**。
+
+### 19.7 R18 执行实录（2026-10-22 20:26–21:10，良哥授权「1、2 做，3 选 A，4 也做」）
+
+**A. 备份（全部可回滚）**：共享盘 `cluster.cnf` / `node2.cnf` / `node3.cnf` / `docker-compose.mysql-cluster.debian.yml` → `*.bak-20261022-tdec5`；182 本地 `platform-mysql-{2,3}/my.cnf` → `my.cnf.bak-20261022-tdec5`（与既有 `.bak-20261020` 并存）。
+
+**B. 文件修正（项1+项2）**：`cluster.cnf` 两行 sed 精确替换（`start_on_boot` OFF→ON、`enforce` ON→OFF）；共享 `node2/3.cnf` 按 182 本地运行真相整体重写（仅 enforce 改 OFF、`start_on_boot` 保持 ON、`plugin_load_add` 保留、`user=mysql` 保留），行尾统一为 LF（本地原件为 CRLF——Windows 遗留，MySQL 两种都读，但 diff 会全量误报，比对前必须 `tr -d '\r'`）。
+
+**C. 挂载收口（项3，方案 A 降险变体）**：
+- 规范化 diff（去注释/空行/行尾）守卫校验：两节点均**仅 enforce 一行差异**才放行；
+- 182 本地 my.cnf → 绝对软链 `→ /mnt/shared/platform/mysql/node{2,3}.cnf`；
+- debian compose 的 `volumes:` 声明 `driver: local` → `external: true`（拆掉「带项目前缀新建空卷 ⇒ 全新 datadir」的雷；缺卷时 compose 直接报错而非静默初始化）；
+- 未采用「docker rm + docker run 同参重建」——参数复制（env/security-opt/卷名）出错面大于收益，且 `docker restart` 本就会重新解析软链（已实证：重启后进容器读到共享文件头）。
+
+**D. persist 清零 + 顺序重启（项4）**：三节点 `RESET PERSIST`（`persisted_variables` 立即归 0，`mysqld-auto.cnf` 仅剩 `{"Version": 2}`）⇒ 按 **node2 → node3 → node1** 逐个 `docker restart`，每步轮询至 SECONDARY ONLINE 再动下一个：
+- node2/node3 重启：try1 即入组，node1 保持 PRIMARY，**写零中断**；
+- node1 重启：离开后约 15s 内 node2(182:3307) 经 Paxos 自动当选 PRIMARY（**写中断仅此窗口**，应用侧 JDBC/DB_HOSTS failover 自动接管），node1 以 SECONDARY 回归；
+- 纠偏：`SELECT group_replication_set_as_primary('<node1 uuid>')` 切回 node1（避免写长期落在磁盘 93% 的 182；`member_weight=60` 使后续选举仍偏好 node1）。
+
+**E. 验收（全绿）**：
+- 三节点 `persisted_variables=0`；运行时 `single_primary_mode=ON`、`enforce=OFF`、`start_on_boot=ON`、node1 `read_only=0/super_read_only=0`、node2/3 `super_read_only=1`；
+- **三节点 `MD5(@@gtid_executed)` 完全一致**（mysql-gr-ops §1.3 硬核验，探针前后两次均一致）；
+- **写探针**：node1 建 `_gr_healthcheck` 库插 1 行 ⇒ node2/node3 均读到（复制链通）⇒ DROP 清理；
+- 应用层：`/ops/`、`/kb/` HTTP 200；kb-gateway 8090 404（根路径无路由，服务在响应）；全部业务容器 Up、platform-mysql-1 healthy。
+
+**F. 执行期两个事件（如实记录）**：
+1. **自造 bug 被守卫抓回**：重写 node3.cnf 时误抄 node2 的 `port = 3307`（node3 应为 3308）——若不修正，node3 重启时将抢 3307 端口直接起不来；grep 复核时发现，sed 修正后才进入重启流程。**教训：模板化重写配置文件后，必须逐节点 grep 关键差异行（port/server-id/local_address）**。
+2. **CRLF 误报**：本地 my.cnf 为 CRLF、新写共享文件为 LF ⇒ 首轮 diff 报「32 行全异」，守卫正确拦下软链替换；行尾规范化后确认仅 enforce 一行差异才放行。**教训：跨 Windows/Linux 作者环境的配置比对，先 `tr -d '\r'`**。
+
+**G. 遗留注记**：① 182 的 `/mnt/shared` 是 CIFS（`//192.168.31.77/ideaworkspace`，soft 挂载）—— node2/3 的配置读取从此依赖该网络共享可用性（node1 本就如此，风险既有且一致）；若 77 宕机，节点重启将读不到配置。② 运行中 node2/3 容器无 healthcheck、无 mem_limit（与 debian compose 声明的 512m+healthcheck 不同）——保留运行现状未动；将来若按 compose 重建，会获得这两项（属预期增强，非本次范围）。③ `verify_tdec5.sh` / `gr_wait.sh` 留在 182 `/root/`（可复用，非探针垃圾；如不需要可删）。
+
