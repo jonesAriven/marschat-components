@@ -946,3 +946,60 @@ curl -s -X POST http://127.0.0.1:8085/auth/login \
 > **多应用同时报认证 500，先花 10 秒查 `SELECT @@read_only`，再翻组件代码。**
 > 本平台两次在夜里先翻了一小时组件代码，根因都在数据库集群。
 > **分支判据**：`read_only=1` + `MEMBER_ROLE=SECONDARY` ⇒ 本节；`MEMBER_STATE=ERROR` 或已离组 ⇒ §10。
+
+---
+
+## 15. R14 沉淀：测试库两个真缺陷 + 0.1.8 生产验证判据（2026-10-22）
+
+> 本轮（R14）最大的产出不是「测过了」，而是**测出了测试自己的两个缺陷** —— 都已实修进回归库（`mykng:/root/verify/r14/r14_lib.py`），并各配了一轮对照实验防复发。
+
+### 15.1 坑 #45 —— ElMessage toast 3 秒时序伪影（错密「无错误提示」全是误判）
+
+**现象**：C 维度（错密负例）3 个应用 × 2 轮共 6 条 FAIL「错密有错误提示」—— 页面全文里找不到任何错误文案，疑似产品静默失败。
+
+**实证（H 探针，300ms 轮询 DOM）**：三应用的错误 toast **都正常弹出**（kb-web「用户名或密码错误（traceId:…）」、infra/cosmic「用户名或密码错误」）—— 只是 **`ElMessage` toast 默认 3 秒过期**，而旧脚本在提交后约 6-8 秒才取一次全文，toast 早已消失。activecode 的错误是**内联持久渲染**所以能抓到，进一步佐证是渲染形态差异而非产品差异。
+
+**修法**：提交错密后**立即轮询 DOM 5 秒**（`.el-message__content` + `.el-form-item__error` 双选择器），把抓到的文本拼进断言全文。修复后 C 维度复跑 + targeted 补跑**全绿**。
+
+**防复发口径**：凡「 toast / 自动消失的 transient UI」类断言，**必须在动作后实时轮询**，不能「做完动作睡几秒再取快照」。判据先行：先确认该应用的错误渲染形态（toast vs inline），再定抓取策略。
+
+### 15.2 坑 #46 —— headless chromium 的 CDP **不上报页面 console API**（console 断言系统性漏抓）
+
+**现象**：0.1.8 上线后连续三轮（J2/J3/J4）headless 复验，kb-ops 的 `[marschat-app-kit]` 归因告警**一条都抓不到**，而代码路径、产物签名（`http-not-200`/`权限探针失败`/`fail-open` 串全在）、网络层证据（fetchPermissions + diagnose 两次带票请求、调用栈分别落在 chunk 不同位置）全部正常 —— 「告警没输出」与「所有间接证据都表明它应该输出」直接矛盾。
+
+**根因（J6 对照实验一锤定音）**：本环境 headless chromium 的 CDP **不上报页面 console API 调用** —— 页面内手动 `console.warn('X')` / `console.error('X')` 均**无** `Runtime.consoleAPICalled`、**无** `Log.entryAdded`（`Log.entryAdded` 只上报浏览器原生网络错误，如 "Failed to load resource: 404"）。即：**所有依赖 CDP 事件链的 console 断言都在系统性漏抓**，J2-J4 的「零告警」全是假阴性。
+
+**修法（已固化进 `r14_lib.P`）**：
+
+```python
+# 注入（每个新 document 生效）：把 console.warn/error 落到 window.__WARN_LOG__
+pg.send('Page.addScriptToEvaluateOnNewDocument', source=P.WRAP_JS)
+# 取证（不依赖 CDP 事件链）：
+pg.warn_log()      # 全量 warn/error
+pg.appkit()        # CDP errs + 页面内 WARN_LOG 双源合并
+```
+
+**验收（K 轮回归）**：修复后同一路径复跑 kb-ops ⇒ `appkit()` 稳定抓到 `权限探针失败：GET /ops-api/auth/permissions?client=marschat-kbops · HTTP 404 · 后果：fail-open…`，REGRESSION_PASS。
+
+**防复发口径**：**console 类断言（零告警 / 有告警 / 告警内容）一律先 `wrap_console()` 再断言**；单靠 CDP 事件链的「console 干净」结论一律不采信。本轮 J2-J4 的教训：当「代码+产物+网络」三边证据都指向某行为应该发生、而 console 说没有时，**先怀疑抓取链，再怀疑产品**。
+
+### 15.3 0.1.8 的生产验证判据（J 系列方法论）
+
+0.1.8（权限探针失败可归因告警）的生产生效确认，按「三层证据」由轻到重：
+
+1. **产物层（不问浏览器）**：下载在线 entry chunk，查双签名串 `权限探针失败` + `fail-open`；再查诊断链常量 `http-not-200`/`network-error` 都在 bundle 里（证明 classify/warn 被打进产物）。
+2. **网络层（不问 console）**：登录后导航一个**带 `meta.perm` 的业务路由**（`/ops/hosts`、`/kb/spaces` 等），用 `performance.getEntriesByType('resource')` 或注入 fetch 包装数 `/auth/permissions` 请求次数与带票状态：**失败路径 = 2 次同 URL**（fetchPermissions + diagnose），**成功路径 = 1 次**；带 `Authorization` 头才说明 `getToken` 通了。
+3. **console 层（必须页面内包装，坑 #46）**：`wrap_console()` 后取 `appkit()` —— kb-ops（T-ENG-17 现场）应出现**一条**含 URL + 归因 + fail-open 后果的告警；其余四应用应**零告警**。
+
+⚠️ **两个必踩的时序点**（J2 盲区，各浪费一轮）：
+
+- **只有带 `meta.perm` 的路由才会触发守卫的 `ensure` 链**（`authGuard.ts`：无 `perm` 元数据直接放行，`ensurePermissions` 根本不跑）⇒ 只着陆 dashboard 验证告警**必然空手而归**；必须导航到具体业务路由。
+- **登录前 bootstrap 的探针无票**（0.1.8 有意不诊断，防登录页噪音）⇒ 登录前的 401 是**预期行为**，不能当缺陷；判据看「有票之后的探针」。
+
+### 15.4 Docker Hub 拉层 stall 与「龙虾」通道（流水线 #126 失败根因）
+
+cosmic #126 在 API 镜像构建时拉 `python:3.12-slim` 两个层（12MB/30MB）**卡在 0B 十八分钟**，触发 20 分钟命令超时整体失败 —— **非代码问题**。mykng 直连 Docker Hub 受国内网络所阻常有 stall；Nexus 8083 docker 仓需认证、不可匿名代理。
+
+**既定解法（仓库里本来就有，别重新发明）**：`cosmic-studio/scripts/pull-via-lobster.sh <image>` —— 经海外机「龙虾」（Tailscale 100.122.231.95）直连 Docker Hub 拉取后 `docker save | ssh | docker load` 回本机。预拉基础镜像后重触发流水线即过（#127 success）。
+
+**防复发口径**：mykng 上任何「docker pull 长时间 0B」先查是不是基础镜像没预拉；前端流水线（pnpm build + tar + SSH 部署）不构建镜像、不受此影响，可与镜像预拉并行推进。
