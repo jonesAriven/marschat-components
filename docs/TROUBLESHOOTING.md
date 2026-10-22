@@ -927,7 +927,7 @@ docker exec platform-mysql-1 mysql -uroot -p<密码> -h 192.168.31.182 -P 3307 \
 
 # ③ 验证必须「看写」，不能只看容器 Up
 curl -s -X POST http://127.0.0.1:8085/auth/login \
-  -H 'Content-Type: application/json' -d '{"username":"admin","password":"admin123"}'
+  -H 'Content-Type: application/json' -d '{"username":"admin","password":"<口令，见 Vaultwarden>"}'
 # 出现 refreshToken 才算真恢复
 ```
 
@@ -1198,3 +1198,20 @@ docker inspect platform-mysql-1 --format '{{range .Mounts}}{{.Source}} -> {{.Des
 
 **G. 遗留注记**：① 182 的 `/mnt/shared` 是 CIFS（`//192.168.31.77/ideaworkspace`，soft 挂载）—— node2/3 的配置读取从此依赖该网络共享可用性（node1 本就如此，风险既有且一致）；若 77 宕机，节点重启将读不到配置。② 运行中 node2/3 容器无 healthcheck、无 mem_limit（与 debian compose 声明的 512m+healthcheck 不同）——保留运行现状未动；将来若按 compose 重建，会获得这两项（属预期增强，非本次范围）。③ `verify_tdec5.sh` / `gr_wait.sh` 留在 182 `/root/`（可复用，非探针垃圾；如不需要可删）。
 
+
+---
+
+## §20 · 看到「OIDC RS256 验签异常：signed with the 'HS384'」别当故障（R20 归因，2026-10-23）
+
+**症状**：kb-ops 日志出现 WARN `OIDC RS256 验签异常（将回退 HS256）: io.jsonwebtoken.UnsupportedJwtException: The parsed JWT indicates it was signed with the 'HS384' signature algorithm, but the provided sun.security.rsa.RSAPublicKeyImpl key`，每次调用一条。
+
+**定性**：**设计内的双验签回退路径，非缺陷**。auth-core 验签链「先 RS256（OIDC access_token）后回退对称（HS384/HS256 业务令牌）」—— 当请求带的是**中心签发的 HS384 业务令牌**（典型来源：邮箱验证码登录 `/auth/mail-login` 签发的本地会话令牌），第一跳 RS256 必然撞算法不匹配，WARN 后回退验证**成功**。
+
+**判据（三步）**：
+1. 看**业务是否正常** —— 登录成功、页面渲染、接口 200 即证明回退验签通过（R20 I 维度 16/16 全绿佐证）；
+2. 看**量级** —— 每次会话初始化几条，非刷屏（历史约 60 条/7 天）；
+3. 看**级别** —— WARN 不是 ERROR，不回滚、不告警。
+
+**与真故障的区分**：若回退后仍失败，症状会是**登录后接口全 401 / 页面假死**（那才是坑 #2/#3 一类的问题），而不是「WARN 之后业务照常」。
+
+**降噪方向**（已登记 `STATUS.md` `T-OBS-6`，暂不排期）：验签链按令牌来源（`typ` 声明或登录通道）预判算法，避免每次先撞一次公钥验签。
