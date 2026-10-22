@@ -1098,4 +1098,68 @@ cosmic #126 在 API 镜像构建时拉 `python:3.12-slim` 两个层（12MB/30MB�
 
 **顺带的测试环境教训**：mykng 上连续多轮 headless chromium 不退出会累积（实测 32 进程/9G 内存）导致新实例 `chromium not ready`；排查先 `ps aux | grep -c 'chromi[u]m'` + `free -m`，`pkill -f 'user-data-dir=<profile>'` 精准清（**模式串带方括号防自伤**）。另：`launch_retry` 会真起 chromium 且占用同名 profile 的 Singleton 锁——单线跑验证不要先调它再 `newpage` 同 profile，直接唯一 profile 名（带时间戳）即可。
 
-**防复发口径**：① 新应用接 GR 集群时，**无论语言**先回答「数据源是否单地址」——Java 用 Connector/J 三地址 + `failOverReadOnly=false`，Python 用本坑三件套（或 ProxySQL/MySQL Router，但那要动部署栈需单独拍板）；② 验收判据 = **候选列表首位故意配成 SECONDARY/不可达地址**，读正常、写自动落 PRIMARY（真集群实测，不是单测 mock）；③ 数据库侧 `single_primary_mode` 复发雷（SET PERSIST 写进数据卷）不在本坑范围，属 T-ENG-19 待良哥拍板项。
+**防复发口径**：① 新应用接 GR 集群时，**无论语言**先回答「数据源是否单地址」——Java 用 Connector/J 三地址 + `failOverReadOnly=false`，Python 用本坑三件套（或 ProxySQL/MySQL Router，但那要动部署栈需单独拍板）；② 验收判据 = **候选列表首位故意配成 SECONDARY/不可达地址**，读正常、写自动落 PRIMARY（真集群实测，不是单测 mock）；③ 数据库侧收尾项（配置文件 `enforce=ON` 相悖、`start_on_boot` 回退、node2/3 挂载分裂）**不在本坑范围**，见 §19 与 `STATUS.md` T-DEC-5。
+
+---
+
+## 19. GR 单主固化后的三处配置不一致（R17 只读取证，2026-10-22）
+
+> **前置定性**：切单主是 **ADR-2026-10-21 的既定决策**（良哥诉求「一台 sql 挂了，可以自动切到另外一台」），10-20 09:10 运行时切换 + 10-20 12:23 配置固化，**不是漂移**。STATUS/T-ENG-19 原「`single_primary_mode=ON` 是 SET PERSIST 写进数据卷的周期复发雷、建议 RESET PERSIST」表述**据此作废**。本节记录 R17 全量只读取证发现的**固化残留**——全部是「配置文件与运行时不一致」形态，当前被 persist 掩盖、集群健康（3/3 ONLINE · node1=PRIMARY 可写 · node2/3 `super_read_only=1`），但构成**重建/重启类操作的雷**。按调试边界铁律，R17 全程只读、**未动任何数据库配置**。
+
+### 19.1 现场事实（2026-10-22 19:4x 实测，三节点）
+
+| 项 | node1（105:3306） | node2（182:3307） | node3（182:3308） |
+|---|---|---|---|
+| 角色 / 只读 | PRIMARY · `read_only=0` | SECONDARY · `super_read_only=1` | SECONDARY · `super_read_only=1` |
+| 运行时 `single_primary_mode` | ON | ON | ON |
+| 运行时 `enforce_update_everywhere_checks` | OFF | OFF | OFF |
+| `mysqld-auto.cnf` persist（作者 `mysql.session`） | ON/OFF · **10-19 14:57:52** | ON/OFF · **10-19 07:27:17** | ON/OFF · **10-19 07:33:06** |
+| 实际生效的配置文件 | 共享 `/mnt/shared/platform/mysql/cluster.cnf`（bind mount） | **182 本地** `/root/mysql-cluster/platform-mysql-2/my.cnf` | **182 本地** `/root/mysql-cluster/platform-mysql-3/my.cnf` |
+| 配置文件 `single_primary_mode` | ON | ON | ON |
+| 配置文件 `enforce_update_everywhere_checks` | 🔴 **ON（与单主相悖）** | 🔴 **ON（与单主相悖）** | 🔴 **ON（与单主相悖）** |
+| 配置文件 `start_on_boot` | 🔴 **OFF** | ON | ON |
+
+- persist 时间戳与容器启动时刻吻合（node2/3 于 10-19 07:28/07:33 重建入组、node1 于 10-19 14:57:44 重启后 8s 落 persist）⇒ **10-19 恢复窗口期由 GR 插件自身（`mysql.session`）随模式切换落盘**，非人工 `SET PERSIST`。`persisted_variables` 全表三节点各恰好这 2 条，无其它夹带。
+- ⚠️ **与 10-20 会话记录矛盾**：`~/.workbuddy/memory/topics/infra-mysql.md` 记「10-20 12:23 复核 `persisted_variables=0`（SET PERSIST 雷已拆除）」，而当前三节点各 2 条 persist 在场。差异成因（RESET PERSIST 是否执行过/是否被插件重建）**未追溯**；按「persist 在场」做决策（官方文档确认 `RESET PERSIST` 可拆除含插件变量的 persist，故清理可行）。
+- 另注：共享配置目录 7 个文件 **10-22 14:55 被整体 touch**（内容 = 10-20 单主态，未变）；182 本地 my.cnf mtime = 10-20 12:23:40（与单主固化同步）。
+
+### 19.2 问题一：🔴 全部配置文件 `enforce=ON` 与单主相悖（重建类操作的雷）
+
+- **官方依据**（MySQL 8.0 文档 §20.1.3.1 / §20.9.1）：单主模式下 `group_replication_enforce_update_everywhere_checks` **必须 OFF**；该变量是**组级配置**，**joiner 的值与组不一致将无法入组**（报错形如 `The member configuration is not compatible with the group configuration ... enforce_update_everywhere_checks ... must have the same value on every server in the group`），且运行时不能改、须整组重启才生效。
+- **当前为何还健康**：persist 的 OFF **覆盖**配置文件的 ON（persist 优先于 my.cnf），三节点运行时一致 OFF。
+- **何时爆**：① 任一节点**数据卷全新初始化**（clone 会连 donor 的 persist 一并带走、暂时掩盖；全新 init 则直接吃配置文件的 ON）⇒ 无法入组；② 有人按 ADR-2026-10-21 §4 的纪律执行 `RESET PERSIST`（该 ADR 明令禁用 SET PERSIST 固化）⇒ persist 拆除后重启即吃配置 ON ⇒ 同样无法入组。**ADR 自带的整改动作，在当前配置文件下会把集群弄坏** —— 这是本节最尖锐的结论。
+- **修法（零运行时影响）**：5 个文件（共享 `cluster.cnf`/`node2.cnf`/`node3.cnf` + 182 本地 my.cnf ×2）的 `group_replication_enforce_update_everywhere_checks` 改 `OFF` 或**删行**（默认即 OFF）。只影响未来重启/重建，**不动当前运行**。
+
+### 19.3 问题二：🟠 `start_on_boot` 三方不一致，node1 的 T-ENG-14 修复已不在
+
+- T-ENG-14 曾把 node1 `start_on_boot` 改 **ON**（rationale：node1 是所有应用的写入点，重启后不自动入组 = 「孤立但可写」温床，正是 T-ENG-13 分歧事故的形态）。
+- **现状**：node1 共享 cluster.cnf = **OFF**（10-20 12:23 随单主固化重写文件时回退；两份备份显示 10-19 07:40 的 ON 修复在 10-20 12:23 前已不在）；node2/3 **本地** my.cnf = ON；共享 node2/3.cnf（未被使用）= OFF。**最差组合：唯一写入点 node1 不自动入组，两个从库自动入组。**
+- **权衡（需良哥拍板）**：**ON** = 崩溃/重启后自动重新入组、消除孤立可写岛（T-ENG-14 立场）；**OFF** = 契合官方 20.5.2 冷启流程（先 bootstrap 再逐个 `START GROUP_REPLICATION`，`infra-mysql.md` 明令禁止全量 ON 重启——无引导者会全失败）。补充事实：单主模式下 node1 重启不入组时，node2+node3 仍占多数（2/3）可正常选主，应用侧 JDBC 三地址 failover（R16 已闭环）接管写 ⇒ **「挂一台自动切」不依赖 node1 重新入组**；但重新入组前 node1 是孤立可写岛，JDBC random 仍可能把连接打进去写 ⇒ 分歧风险。
+- ⚠️ 附带：182 的 `docker-compose.mysql-cluster.debian.yml` **指向共享 node2/3.cnf**，而运行中的 node2/3 挂 182 本地（T-ENG-14「未修」项仍在）——**下次在 182 用该 compose 重建 node2/3，它们将吃到共享副本的 `start_on_boot=OFF`**，与现行本地 ON 的行为发生变化。
+
+### 19.4 问题三：🟡 node2/3 挂载与共享配置真源分裂（T-ENG-14 未修项延续）
+
+- 共享盘 `/mnt/shared/platform/mysql/` 有全套 `cluster/node2/node3.cnf`（10-20 同步为单主态）；**node2/3 运行中不读它们**，读 182 本地 my.cnf。「改共享盘对 node2/3 无效」的根因仍在。
+- 且共享副本与本地副本**已不一致**：`start_on_boot` 共享=OFF vs 本地=ON；`enforce` 双方都 ON（相悖）。
+- **修法二选一（需拍板）**：**A** 182 改用 debian compose 挂共享 node2/3.cnf（需先把共享副本的 `start_on_boot` 定下来，避免 19.3 的附带风险）；**B** 明确「182 本地为 node2/3 真源」，共享 node2/3.cnf 删除或加显著注释防误用。
+
+### 19.5 取证命令（复制即用）
+
+```bash
+# 角色/只读/persist（三节点各跑；密码从容器 env 取，勿落文档）
+docker exec platform-mysql-1 mysql -uroot -p"$PW" -N -e \
+  "SELECT MEMBER_HOST,MEMBER_ROLE,MEMBER_STATE FROM performance_schema.replication_group_members;
+   SELECT @@group_replication_single_primary_mode,@@group_replication_enforce_update_everywhere_checks,@@read_only,@@super_read_only;
+   SELECT VARIABLE_NAME,VARIABLE_VALUE FROM performance_schema.persisted_variables;"
+# persist 原文（含时间戳与作者——判断「谁写的」关键）
+docker exec platform-mysql-1 cat /var/lib/mysql/mysqld-auto.cnf
+# 实际挂载（以 docker inspect 为准，别猜目录；105 与 182 布局不同）
+docker inspect platform-mysql-1 --format '{{range .Mounts}}{{.Source}} -> {{.Destination}}{{println}}{{end}}'
+```
+
+### 19.6 待拍板（收敛为 `STATUS.md` T-DEC-5 四项）
+
+1. **`enforce=ON` → OFF**（5 个配置文件；单主模式官方要求 OFF，joiner 值不符无法入组；零运行时影响，**优先做**）
+2. **node1 `start_on_boot`** OFF→ON（恢复 T-ENG-14 修复）或维持 OFF（官方冷启流程），并统一三节点口径
+3. **node2/3 挂载对齐**（19.4 的 A/B 二选一）
+4. **维护窗口**：`RESET PERSIST` + 整组重启，让配置文件成为唯一真源（**必须先完成 1**，否则重启后节点无法入组）
