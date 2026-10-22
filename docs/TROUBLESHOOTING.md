@@ -1003,3 +1003,39 @@ cosmic #126 在 API 镜像构建时拉 `python:3.12-slim` 两个层（12MB/30MB�
 **既定解法（仓库里本来就有，别重新发明）**：`cosmic-studio/scripts/pull-via-lobster.sh <image>` —— 经海外机「龙虾」（Tailscale 100.122.231.95）直连 Docker Hub 拉取后 `docker save | ssh | docker load` 回本机。预拉基础镜像后重触发流水线即过（#127 success）。
 
 **防复发口径**：mykng 上任何「docker pull 长时间 0B」先查是不是基础镜像没预拉；前端流水线（pnpm build + tar + SSH 部署）不构建镜像、不受此影响，可与镜像预拉并行推进。
+
+## 16. R14-L/M 沉淀：双模应用 sessionWatcher 误踢链 + 页面内包装的导航竞态丢失（2026-10-22）
+
+> 本节对应 `STATUS.md` 的 `T-ENG-20`（infra 账密会话被踢回 `/infra/login?slo=1`）—— **根因、修法、复验全链闭环**。
+
+### 16.1 坑 #47 —— 双模应用漏传 `watchSession` ⇒ legacy 账密会话被 sessionWatcher 误踢
+
+**现象（R13 登记、R14-J7 部分观测）**：infra **账密登录**后，任何**全页面加载/重载**都会把用户踢回 `https://monitor.marschat.online/infra/login?slo=1`；SSO 路径不会。J7 曾记录「重载后 bootstrap 权限探针 `hasAuth=false` ⇒ legacy 令牌刷新后取不到」。
+
+**根因（R14-L 静态代码 + 动态取证双重坐实，J7 的「取不到」被证伪——那是后果）**：
+
+1. infra `marschat.ts` **未传 `watchSession`**、`APP_OPTIONS` **未设 `sessionMode`** ⇒ app-kit `config.ts` 缺省 `sessionMode='oidc'` ⇒ `useWatcher = (undefined ?? true) && 'oidc'==='oidc'` = **恒真**（`createMarschatApp.ts` 判据链③）；
+2. 账密登录后令牌照落 localStorage（实测 `infra_access_token` 189 字符 HS384 JWT + `infra_token_kind=legacy`）；
+3. **全页面重载** ⇒ bootstrap 见 `getToken()` 有值 ⇒ `sso.watchSession()` 启动（`createMarschatApp.ts:393` `if (useWatcher && getToken())`）；
+4. watcher **3s 首探** `auth-center /auth/session`（`sessionWatcher.ts` `firstProbeTimer`）；legacy 账密登录**根本没有 IdP 会话**（没走 SAS 授权流）⇒ 探针返 `authenticated:false`；
+5. `confirmCount` 缺省 1 ⇒ 一次即判失 ⇒ `clearAuth()` **清掉刚登录的令牌** + `window.location.assign('/infra/login?slo=1')`。
+
+⇒ 三个此前的疑点一次说清：**为何只有重载触发**（SPA 内登录不重启 watcher，登录页 bootstrap 时无票不启动）；**为何 SSO 不触发**（有真 IdP 会话，探针 `authenticated=true username=1`）；**为何 bootstrap 探针无票**（watcher 已先清令牌——J7 记录的「取不到」是**后果非原因**，R14-L 实测重载后 bootstrap 权限探针 `hasAuth=true 200`）。
+
+**R14-L 动态证据（headless + CDP Network 层）**：账密登录 → 重载 → bootstrap 权限探针 `hasAuth=true 200`（t0）→ 3.3s 后 URL 变 `/infra/login?slo=1` 且 localStorage 全清（t0+3.3s，与 3s 首探 + assign 时序吻合）→ login 页再探无票 401（后果闭合）；CDP 层证实 `/auth/session` 探针**确实发出**（200）。SSO 对照：探针 `authenticated:true` 不踢。
+
+**修法（devtools `4dc21f63`，流水线 #865 已部署）**：infra `marschat.ts` 传函数式判据 —— `watchSession: () => isOidcToken()`（app-kit `types.ts` 推荐的双模写法；`isOidcToken()` 读 `infra_token_kind==='oidc'`，legacy 会话天然排除）。portal / kb-web 的等价处置是 `sessionMode:'bff' + watchSession:false`（T-LOW-22）—— **infra 是漏配的双模应用**，本轮补齐。
+
+**复验（R14-M，14/14 全绿）**：账密登录 → 重载 → **不被踢**（URL 停 `/infra/dashboard`）、令牌键仍在、**CDP 层零 `/auth/session` 探针**（watcher 未启动）；SSO 对照 watcher 照常探针、不踢、三键俱在。
+
+**防复发口径**：**双模应用（SSO + 独立账密并存）装配 app-kit 时必须显式传 `watchSession` 函数式判据**（或 `sessionMode:'bff'`）——缺省判据按「纯 OIDC 应用」处理，会把 legacy 会话送进 watcher 误踢链。已在用 app-kit 的应用按 `grep -rn "watchSession" src/marschat.ts` 自查：**没有的双模应用都是雷**。
+
+### 16.2 坑 #46 补丁 —— 页面内 fetch 包装在「探针后立即导航」场景丢记录
+
+**现象**：R14-L 取证时，页面内 fetch 包装抓到了 SSO 模式的 `/auth/session` 探针（`authenticated:true`），却**没抓到**账密模式的同URL探针——而 CDP Network 层证明它确实发出了（200）。
+
+**根因**：`sessionWatcher` 判失后的动作是 `clearAuth()` + `location.assign(...)` —— 探针 fetch 的 `window.__FETCH_LOG__.push(rec)` 写在 `.then` 回调里，**导航在 push 之前发生** ⇒ 页面销毁、记录丢失。SSO 模式探针后不导航，故能抓到。
+
+**修法（判据固化）**：凡「某行为之后可能立即导航」的取证，**必须 CDP Network 层（`P.reqs`/`P.stmap`，浏览器原生域不受页面销毁影响）兜底**，页面内包装只作增益。R14-M 的 M4 断言即按此写：`cdp_sess = [u for u in pg.reqs if '/auth/session' in u]`。
+
+**防复发口径**：与坑 #46 合成完整口径 —— **console 类断言靠页面内包装（CDP 不报 console API）；网络类断言靠 CDP Network 层（页面内包装怕导航竞态）**；两层互不替代。
