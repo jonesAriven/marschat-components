@@ -49,6 +49,7 @@ import {
   toRouterPath,
   buildPermissionsUrl,
   classifyPermissionsFailure,
+  shouldPrefetchPermissions,
   warnPermissionsFailure,
   type PermissionsResponseLike,
   type ResolvedAppConfig,
@@ -403,7 +404,7 @@ export function createMarschatApp(options: MarschatAppOptions): MarschatApp {
         })
       }
 
-      if (options.prefetchPermissions !== false) {
+      if (shouldPrefetchPermissions(options, !!getToken())) {
         // 🔴 与守卫同一入口：预取 + 失败归因（同一 URL 同一会话只告警一次）
         void ensurePermissions(permissions).catch(() => { /* fail-open：权限预取失败不阻塞启动 */ })
       }

@@ -828,9 +828,38 @@ export function warnPermissionsFailure(
   return true
 }
 
+/**
+ * 权限预取前置判据（0.1.9 新增）—— **无票不探**。
+ *
+ * 🔴 为什么必须判令牌（2026-10-22 R19 实测）：
+ * `bootstrap()` 原先只判 `prefetchPermissions !== false`，于是**登录页（无任何令牌）也会打一发
+ * `GET {permissionsIssuer}/auth/permissions`**。两个后果，都是「不报错但坏」的形态：
+ *
+ * ① **控制台必然多一条 401**（后端把该端点挂在鉴权之后的应用，如 kb-ops 经 nginx
+ *    `/ops-api/auth/` → kb-gateway）：登录页每访问一次就一条 `Failed to load resource: 401`，
+ *    监控侧把它计成失败率，排障时又被误读成「权限链断了」（R19 B 维度 2/2 轮复现）。
+ * ② **可能把权限缓存预热成 fail-open**：`fetchPermissions` 成功即写 `lastFetchedAt`；
+ *    若某应用后端**匿名**就回了 `200 + configured:false`，这份「未配置」状态会在 60s 内
+ *    被登录后的守卫/菜单复用 ⇒ 窗口期内**菜单级限制全放行**（真实越权窗口）。
+ *
+ * 判据只认「本地是否已有令牌」：SSO 回调 / 账密登录成功之后 `bootstrap()` 与守卫都会带票重跑，
+ * 预取语义不受影响；未登录时本就不该有权限可预取。
+ *
+ * @param options 装配选项（只消费 `prefetchPermissions`）
+ * @param hasToken 调用时刻本地是否已有 access_token
+ */
+export function shouldPrefetchPermissions(
+  options: { prefetchPermissions?: boolean } | null | undefined,
+  hasToken: boolean,
+): boolean {
+  if (options && options.prefetchPermissions === false) {
+    return false
+  }
+  return !!hasToken
+}
+
 /** 站内绝对路径（带部署前缀），用于跨页跳转与 SLO 回跳。 */
-export function appUrl(config: Pick<ResolvedAppConfig, 'contextPath'>, path: string, origin = ''): string {
-  const base = baseFragment(config.contextPath)
+export function appUrl(config: Pick<ResolvedAppConfig, 'contextPath'>, path: string, origin = ''): string {  const base = baseFragment(config.contextPath)
   const p = path.startsWith('/') ? path : `/${path}`
   return `${origin}${base}${p}`
 }

@@ -134,7 +134,13 @@ export interface MarschatAppOptions extends AppOptionsInput {
   userManagement?: UserManagementOptions
   /** 是否自动注册 `/login` `/sso-callback` `/users` 路由，默认 true。 */
   autoRoutes?: boolean
-  /** 是否在挂载后预取权限点，默认 true。 */
+  /**
+   * 是否在挂载后预取权限点，默认 true。
+   *
+   * ⚠️ **0.1.9 起：无令牌时不预取**（`shouldPrefetchPermissions`）——
+   * 登录页（未登录）本就没有权限可预取，而探一次必然 401（控制台噪声 + 监控失败率）
+   * 或可能把权限缓存预热成 `configured:false`（60s 越权窗口）。本字段只用于**额外**关闭。
+   */
   prefetchPermissions?: boolean
   /**
    * 🔴 **清理「令牌四键之外」的应用自管会话残留**（登出/ 401 / 会话丢失时调用）。

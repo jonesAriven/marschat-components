@@ -22,6 +22,7 @@ import {
   loadRuntimeConfig,
   buildPermissionsUrl,
   classifyPermissionsFailure,
+  shouldPrefetchPermissions,
   formatPermissionsWarning,
   warnPermissionsFailure,
   createPermissionsWarnDedupe,
@@ -646,6 +647,32 @@ console.log('\n[15] 权限探针失败归因与告警 —— fail-open 不再「
     }
     eq(logs.length, 1, '🔴 E2E·20 次导航仍只有 1 条告警（防刷屏铁律）')
   }
+}
+
+// ---------------------------------------------------------------------------
+// [16] shouldPrefetchPermissions —— 无票不探权限（0.1.9，R19 实测缺陷）
+// ---------------------------------------------------------------------------
+console.log('\n[16] shouldPrefetchPermissions —— 无票不探权限（登录页零 401）')
+{
+  eq(shouldPrefetchPermissions({}, false), false, '无票 + 未配置 → 不预取')
+  eq(shouldPrefetchPermissions({}, true), true, '有票 + 未配置 → 预取（默认语义不变）')
+  eq(shouldPrefetchPermissions({ prefetchPermissions: false }, true), false,
+     '显式 false 优先于有票 → 不预取')
+  eq(shouldPrefetchPermissions({ prefetchPermissions: true }, false), false,
+     '显式 true 也越不过「无票」闸门 → 不预取')
+  eq(shouldPrefetchPermissions(undefined, true), true, 'options 缺失 + 有票 → 预取')
+  eq(shouldPrefetchPermissions(null, false), false, 'options 为 null + 无票 → 不预取')
+
+  // 变异体 A：退回 0.1.8 语义（只判配置项）⇒ 无票也探 ⇒ 登录页 401 复现
+  const mutantA = (o) => o?.prefetchPermissions !== false
+  eq(mutantA({}), true, 'A·变异体（只判配置）在登录页仍会探权限')
+  eq(mutantA({}) !== shouldPrefetchPermissions({}, false), true,
+     '🔴 A·变异体被抓到：无票场景两者结论相反（true ≠ false）')
+
+  // 变异体 B：过度收紧（恒不探）⇒ 登录后也不预取，菜单要等守卫首次导航才准
+  const mutantB = () => false
+  eq(mutantB() !== shouldPrefetchPermissions({}, true), true,
+     '🔴 B·变异体被抓到：有票场景真实实现必须预取（false ≠ true）')
 }
 
 console.log(`\n${'='.repeat(56)}`)

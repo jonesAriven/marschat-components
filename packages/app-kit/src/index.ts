@@ -33,6 +33,7 @@ export {
   loadRuntimeConfig,
   buildPermissionsUrl,
   classifyPermissionsFailure,
+  shouldPrefetchPermissions,
   formatPermissionsWarning,
   warnPermissionsFailure,
   createPermissionsWarnDedupe,
