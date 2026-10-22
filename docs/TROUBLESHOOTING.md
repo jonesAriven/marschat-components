@@ -1039,3 +1039,37 @@ cosmic #126 在 API 镜像构建时拉 `python:3.12-slim` 两个层（12MB/30MB�
 **修法（判据固化）**：凡「某行为之后可能立即导航」的取证，**必须 CDP Network 层（`P.reqs`/`P.stmap`，浏览器原生域不受页面销毁影响）兜底**，页面内包装只作增益。R14-M 的 M4 断言即按此写：`cdp_sess = [u for u in pg.reqs if '/auth/session' in u]`。
 
 **防复发口径**：与坑 #46 合成完整口径 —— **console 类断言靠页面内包装（CDP 不报 console API）；网络类断言靠 CDP Network 层（页面内包装怕导航竞态）**；两层互不替代。
+
+### 16.3 坑 #47 R15 延伸 —— kb-ops 第二例：邮箱验证码登录会话被误踢（比 infra 更隐蔽）
+
+**发现路径**：R15 按 16.1 防复发口径做双模应用 `watchSession` 普查（`grep -rn "watchSession" src/marschat.ts`）：portal / kb-web / cosmic 均显式 `watchSession:false`（cosmic 在 `main.js` 内按 `isOidcSession()` 分流）、infra 已修 ⇒ **kb-ops 是第二例漏配**（未传 `watchSession` 且未设 `sessionMode`，与 infra 修复前完全同构）。
+
+**为何 kb-ops 更隐蔽**：kb-ops 登录页 `showLocalLogin=false`（后端无本地登录端点 `/kb-ops/login` 必 403），表面是「纯 SSO 应用」；但 `showMailLogin=true` —— **邮箱验证码登录**走 auth-center `/auth/mail-login`（`AuthServiceImpl.loginByMail`：只签发 JWT + 写 sso cookie，**不建 Spring Security 会话**；`/auth/session` 判据是 SecurityContext，见 `AuthController.session` 注释）⇒ 该会话探针恒 `authenticated:false`；且 `LoginView.onMailLogin` 成功后 `window.location.replace(...)` **硬跳转** ⇒ bootstrap 必带票重跑 ⇒ watcher 必启动 ⇒ 3s 后必被踢 ⇒ **修复前每次邮箱登录 3 秒后被踢回 `/ops/login?slo=1`**（用户表现为「登录成功闪一下就被踢」，无限重试）。此前未暴露只因测试库无邮箱登录用例（坑 #45 家族：没测的路径不报错）。
+
+**修法（devtools `73c312ec`，流水线 #866 已部署）**：与 infra 同款 —— `watchSession: () => isOidcToken()`；邮箱登录只 `setToken` 不设 `token_kind` ⇒ `isOidcToken()` 返 false ⇒ watcher 不启动；SSO 流经 `sso.ts:121 setTokenKind('oidc')` 不受影响。
+
+**复验（R15-N，15/15 全绿）**：qa 账号（`qa-ms-u2@example.com`）邮箱登录（发码 → Redis 取码 → 填码真流程）→ 硬跳转落 `/ops/dashboard` → 13s 观测窗**不被踢**、令牌键在、**CDP 层登录后零新 `/auth/session` 探针**；SSO 对照 `token_kind=oidc`、watcher 照常探针不回归。
+
+**顺带两个调查记录**：① `e2e_admin@test.local` 在 `marschat_auth.user` 已 `deleted=1`（软删，MyBatis-Plus 逻辑删除过滤 ⇒ 邮箱登录报「邮箱未绑定账号」）—— 邮箱登录类用例须用未删+启用+已绑邮箱账号；② **`marschat_auth` 才是 auth-center 真源库，`kb_auth` 是遗留库**（两者都有 `user` 表，查错库会得出完全错误的结论）。
+
+## 17. R15 沉淀：同源权限代理三要素 + 遗留 fetchPermissions 跨域陷阱（T-ENG-17 全链，2026-10-22）
+
+> 本节对应 `STATUS.md` 的 `T-ENG-17`（kb-ops 权限链双通道断裂）—— **根因、修法、复验全链闭环（坑 #48）**。
+
+### 17.1 坑 #48 —— 同源权限探针需要「部署栈路由」就位；应用侧遗留 `fetchPermissions` 是跨域暗线
+
+**现象**：kb-ops 登录后导航业务路由，app-kit 权限探针 `GET /ops-api/auth/permissions?client=marschat-kbops` 返 **404** ⇒ `configured=false` ⇒ **fail-open 静默全放行**（0.1.8 归因告警让失效自证，但根因未断）；R12 另记录「跨域直连 `auth.marschat.online/auth/permissions` 恒 403」而 R14 实测同 URL 返 200 —— 两轮观测矛盾。
+
+**根因（两层，R15 定位）**：
+
+1. **部署层缺路由** —— app-kit ≥0.1.3 的同源策略（`resolvePermissionsIssuer`：IdP 与站点不同源 ⇒ 探针 = `apiBase + /auth/permissions`）**要求部署栈把 `{apiBase}/auth/**` 路由到认证中心**：kb-web 有（kb-gateway `/kb/api/auth/**`）、infra 有（nginx `/infra/api/auth/**`）、**唯 kb-ops 缺** —— 宿主 nginx `/etc/nginx/conf.d/locations/ops.conf` 把 `/ops-api/` 整体代理给自家后端（context-path `/kb-ops`，无 `/auth/permissions` 端点）⇒ 带票 404（无票先被 Spring Security 拦成 401）。
+2. **前端遗留跨域暗线** —— `MainLayout.vue` 的 `onMounted` 仍活跃调 `fetchPermissions(permOptions)`（infra/kb-web 同处**只 import 未调用**，唯独 kb-ops 在调），`permOptions.issuer = APP_CONFIG.issuer`（跨域 IdP）。该调用与 app-kit 预取**共享 60s 模块级缓存**：登录页预取无票 401 不预热 ⇒ SPA 登录后 MainLayout 挂载时缓存冷 ⇒ 这一发即**跨域直连中心**（R15-O 实测抓到）。R12「恒 403」/R14「200」的矛盾由此解释 —— 取决于票据类型与 CORS 放行时机；**中心一旦收紧 CORS 即静默 fail-open**（正是 R11 T-ENG-11 的原始形态）。
+
+**修法（两处，当日闭环）**：
+
+1. 宿主 nginx 新增 `location /ops-api/auth/ → proxy_pass 127.0.0.1:8090/kb/api/auth/`（与既有 `/ops/auth-api/` **同上游**，零新增端点暴露面 —— 同样的网关 auth 路由本就经 `/ops/auth-api/` 公开可达；`nginx -t` + 热 reload；改动前备份 `ops.conf.bak-20261022-teng17`）。**未走**「kb-ops 后端补 BFF 代理端点」方案：走网关与 kb-web 同路、零后端改动、无服务身份兜底语义风险。
+2. kb-ops `permOptions.issuer` 改 `APP_CONFIG.apiBase`（devtools `a7f08302` + 流水线 #867）—— 与 app-kit 缺省策略同路，跨域暗线切除；SSO 客户端 issuer 不变（换票仍必须在中心发生）。
+
+**复验（R15-O/P，headless 真浏览器，全绿）**：探针**同源 200 + `configured=true` + 权限点数组**（qa 仅 `marschat-kbops:menu:dashboard`）；**零跨域 `/auth/permissions`**（邮箱 + SSO 冷缓存双流，CDP 层实证 cross=[]）；**零 `[marschat-app-kit]` 告警**；**权限真正生效** —— qa 账号侧边菜单**仅「看板」**（修复前 fail-open 全量渲染）；业务端点无回归（`/ops-api/ops/dashboard` 200、越权 `/ops-api/ops/host/list` 403 = 正确执行）；SPA 200。
+
+**防复发口径（同源权限代理三要素，缺一即 fail-open）**：① **组件侧**：`permissionsIssuer`/缺省策略走同源 `apiBase`（app-kit ≥0.1.3 已内建）；② **部署侧**：`{apiBase}/auth/**` 必须路由到认证中心（新增/改造应用时与前端 apiBase 同步设计，**别忘了 nginx/gateway 这一层**）；③ **应用侧**：`grep -rn "fetchPermissions(permOptions)" src/` —— MainLayout 等遗留活跃调用点的 `permOptions.issuer` 必须同源（共享 60s 缓存会让它在前端无感时补发跨域请求）。**验收判据**：登录后 CDP 层 `/auth/permissions` 请求**零跨域**、带票 200、`configured=true`、非超管账号菜单按权限点收窄。
