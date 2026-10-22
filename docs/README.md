@@ -6,7 +6,7 @@
 > ⚠️ **冲突裁定**：同一事实若本文与 ADR 不一致，**以反映最新线上实测的一方为准，并当场回写本文**——不要两处各说各话（历史教训：手册与 ADR 长期漂移，如用户真源表名 `user` vs `sys_user`、F1 密钥共享处数、Phase 11 待办状态）。
 >
 > **版本基线（2026-10-22 实测态**；配置项与环境变量全表见 `docs/CONFIG-REFERENCE.md`）**
-> `@marschat/app-kit` **0.1.8**（装配层，Phase 13 新增；**已发 Nexus npm-hosted `latest`（流水线 #78）并完成五应用落地**：devtools 四前端 + cosmic-studio 锁文件 `version`→0.1.8（`specifier` 与 `package.json` 零改动），流水线 #861/#862/#863/#864 + cosmic #127 全 success，五应用在线 chunk 均含 0.1.8 签名串；**0.1.8 = 权限探针失败时输出一条含 URL + 归因 + fail-open 后果的可归因告警**，「fail-open 不再静默」—— kb-ops 生产现场已实测出现该告警，四应用成功路径零告警零额外请求，见 `STATUS.md` T-ENG-18；**0.1.7 = 运行时配置全部候选探测失败时输出一条含全部候选 URL 与归因的中文告警**，见 `STATUS.md` T-ENG-16）｜ `@marschat/auth-components` **0.8.8**（0.8.8 = app 作用域身份只读，D-3 收口；已发布 Nexus npm-hosted）｜ `@marschat/frontend-common` 0.3.5 ｜ `com.marschat:auth-core` **2.3.0**（2.3.0 = 登录校验放行配置化 `marschat.auth.anonymous`，Phase 14 新增；2.2.0 = BFF 管理代理自动装配；已发布 Nexus maven-releases）｜ `com.marschat:common-core` 1.1.6
+> `@marschat/app-kit` **0.1.9**（装配层，Phase 13 新增；**已发 Nexus npm-hosted `latest=0.1.9`** 并完成五应用锁文件升级 —— devtools `84551a86` / cosmic `7fe683f`，双端 tip 核验一致，逐条流水线部署；**0.1.9 = 无令牌不预取权限**：新增纯函数 `shouldPrefetchPermissions(options, hasToken)`，登录页/废票场景不再发必然 401 的权限探针，`prefetchPermissions:false` 显式关闭语义不变，见坑 #50；单测 238/238）｜ **0.1.8**（**已发 Nexus npm-hosted `latest`（流水线 #78）并完成五应用落地**：devtools 四前端 + cosmic-studio 锁文件 `version`→0.1.8（`specifier` 与 `package.json` 零改动），流水线 #861/#862/#863/#864 + cosmic #127 全 success，五应用在线 chunk 均含 0.1.8 签名串；**0.1.8 = 权限探针失败时输出一条含 URL + 归因 + fail-open 后果的可归因告警**，「fail-open 不再静默」—— kb-ops 生产现场已实测出现该告警，四应用成功路径零告警零额外请求，见 `STATUS.md` T-ENG-18；**0.1.7 = 运行时配置全部候选探测失败时输出一条含全部候选 URL 与归因的中文告警**，见 `STATUS.md` T-ENG-16）｜ `@marschat/auth-components` **0.8.8**（0.8.8 = app 作用域身份只读，D-3 收口；已发布 Nexus npm-hosted）｜ `@marschat/frontend-common` 0.3.5 ｜ `com.marschat:auth-core` **2.3.0**（2.3.0 = 登录校验放行配置化 `marschat.auth.anonymous`，Phase 14 新增；2.2.0 = BFF 管理代理自动装配；已发布 Nexus maven-releases）｜ `com.marschat:common-core` 1.1.6
 > 6 应用（portal / activecode / kb-web / **cosmic-studio**（client-id，历史文档简写 cosmic）/ kb-ops / infra-monitor）的**登录页、SSO、统一鉴权、权限体系**全部接入。
 >
 **📚 文档地图**（本目录）
@@ -374,7 +374,12 @@ registry.addInterceptor(jwtInterceptor)
 ```bash
 node scripts/scaffold-app.mjs --app-id marschat-demo --context-path /demo --out ./tmp/demo
 ```
-生成前端 4 文件（`marschat.ts` / `main.ts` / `menus.ts` / `App.vue`）+ 后端 2 文件（`bff-whitelist.yml` / 配置片段）+ 接入清单。
+
+生成前端 **6 文件**（`marschat.ts` / `main.ts` / `router.ts` / `menus.ts` / `App.vue` / `views/Dashboard.vue`）+ 后端 **3 文件**（`bff-whitelist.yml` / `menu-registry.yml` / `application-snippet.yml`）+ 接入清单。
+
+**0.1.9 起带自检门禁**：生成完立刻跑 8 项必检断言（`homePath` / `watchSession: () =>` / `/dashboard` 路由 / `marschat.install` / `marschat.bootstrap()` / `menu-registry.yml` 的 `public: true` / `anonymous.paths` / `bff-whitelist.yml` 的 `client-in-path`），**任一缺失即 `exit 1` 并打印后果**（如「缺 `watchSession` ⇒ 双模应用账密会话 3 秒被踢，坑 #47」）。门禁先做 `stripComments()` 再去匹配，防止注释行里的同名文本骗过检查（该漏洞在 R19 被变异体实测抓出）。
+
+> 这是「**新应用接入只改少量配置、不改大量代码**」这条诉求的落地物：接入方只需改 `--app-id` / `--context-path` 与后端 `application-snippet.yml` 三五行配置，装配、路由、权限元信息、白名单、菜单登记全部由脚手架产出并自检。
 
 ### 迁移口径（存量 6 应用）
 
@@ -620,6 +625,12 @@ apis:                       # ⚠️ api 点任何模式都不自动授予，写
 | **42** | **「后端已有同源权限代理」不等于「前端接上了」** —— 迁移到 app-kit 后，权限探针 issuer 由 `permissionsIssuer` 决定，删掉手写 `utils/permissions.ts` 时若漏传该字段，前端会退回直连中心 | 中心要 HS384、浏览器持 OIDC RS256 ⇒ 页面 `fetch` 直接 `Failed to fetch`（连 403 都拿不到）⇒ `configured=false` ⇒ **权限体系静默全放行且零报错**。2026-10-17 夜实测覆盖面为 **kb-web / kb-ops / infra 三个应用**，其中 kb-web 与 infra 的后端代理**早已可用**（`${authApiBase}/permissions` = 200 + `configured:true`），纯属前端没指过去。**✅ 0.1.6 起组件侧收口**：新增 `resolvePermissionsIssuer()`，**缺省不再回落跨域 IdP**——优先级 = 显式 `permissionsIssuer` >（IdP 同源时的 `issuer`）> 同源代理 **`apiBase`**（不是 `authApiBase`：内部还要拼 `/auth/permissions`）> 兜底 `issuer`。升到 0.1.6 的应用即便不传该字段也会自动走同源代理（旧版必须逐应用补一行）。**反向警示不变**：绝不能反向把 BFF 基址塞进 `issuer`，否则 SSO 免登与 SLO 联动全部静默失效 |
 | **43** | **运行时配置「全候选探测都失败」时禁止静默回落内置默认值** —— `@marschat/app-kit` 0.1.7 起：`loadRuntimeConfig()` 在所有候选 URL 都失败时输出**一条**含全部候选 URL + 状态码 + 归因（`http-not-200` / `empty-body` / `not-an-object` / `parse-error`）的 `[marschat-app-kit]` 告警；成功路径零日志，**全败才告警且只有一条** | 修复前：子路径应用 `app-config.json` 探测失败 ⇒ 整份派生配置静默回落内置默认值，页面「看着正常」但 clientId/redirectUri 全是默认值，控制台**无任何可归因输出**（坑 #41 的定位成本几乎全在这里）。监控判据：只要出现**一条**该告警，即可判定该应用本次启动配置整份没生效 |
 | **44** | **权限探针失败必须「可见」，不能静默 fail-open** —— `@marschat/app-kit` 0.1.8 起：`fetchPermissions` 失败时输出**一条** `[marschat-app-kit]` 告警，含请求 URL、失败原因（`network-error`（含 CORS 跨域被拦）/ `http-not-200` / `empty-body` / `not-an-array` / `parse-error`）、HTTP 状态与后果文案；按「URL+原因」去重，**同一次页面会话同一原因只打一次** | 修复前：探针失败 ⇒ `configured=false` ⇒ **菜单/按钮级限制全部静默放行且零报错**（fail-open 是设计取舍，但「失败不可见」是缺陷）。kb-ops 2026-10-20 R13 实测：同源代理 `/ops-api/auth/permissions` 返 **401**（后端代理缺失/未带票），非超管用户会看到全量菜单与按钮；0.1.8 后该现象在控制台自带 URL 与原因，无需再抓包定位。配套 API：`classifyPermissionsFailure` / `formatPermissionsWarning` / `warnPermissionsFailure` / `buildPermissionsUrl` / `createPermissionsWarnDedupe` |
+| **45** | **ElMessage toast 有 3s 存活期，负例断言不能只取一次快照** —— 浏览器负例（错密/无票）断言 toast 文案时，必须**实时轮询**（如每 200ms 取一次、窗口 ≥3s），不能「等固定 sleep 后取一次 DOM」 | 2026-10-20 R14 实测：`await sleep(4000)` 后再取 DOM，toast 已自行销毁 ⇒ 得到空串并误判为「文案缺失」，一批负例假失败由此产生。改轮询后 **146 + 40 PASS / 0 真失败** |
+| **46** | **headless CDP 抓不到页面内 `console.*` 调用（`Runtime.consoleAPICalled` 不上报）** —— 断言「控制台零告警」必须用 `Page.addScriptToEvaluateOnNewDocument` 在页面内**包装 `console.warn/error`** 并推入 `window.__mc_console`，再从 CDP `Runtime.evaluate` 读取 | R14 对照实验实锤：同一页面同一告警，CDP 事件流 0 条、页面内包装 1 条。**J2–J4 三轮「零告警」结论全部是假阴性**，0.1.8 的生产效果差点被误判为「没生效」。同理，**导航导致页面销毁时 push 来不及执行**（如 `location.assign` 前的探针）⇒ 关键请求断言要走 `Network.requestWillBeSent` 网络层，不能只靠页面内 fetch 包装 |
+| **47** | **双模应用（SSO + 本地账密）不传 `watchSession` ≠ 关掉会话监视，而是按「纯 OIDC 应用」处理** —— 必须显式传 `watchSession: () => isOidcToken()` | app-kit 缺省 `sessionMode='oidc'` ⇒ `sessionWatcher` 对 **legacy 账密会话**也启动 ⇒ 首探 `/auth/session` 无 IdP 会话 ⇒ `clearAuth()` + `location.assign('/login?slo=1')`，**登录后 3 秒被踢**。同族两例：infra（R14-L/M，devtools `4dc21f63`）· kb-ops（R15-N，邮箱登录被踢，`73c312ec`）。对照：portal / kb-web / cosmic 显式传了 `sessionMode:'bff' + watchSession:false`，所以从未复发 |
+| **48** | **同源权限探针要求「部署栈路由」就位，不只是后端有端点** —— 应用 nginx 必须把 `<apiBase>/auth/**` 代理到网关/中心，否则带票探针仍 404 | kb-ops R15：后端 `/auth/permissions` 端点存在，但宿主 nginx 把 `/ops-api/` 整体给自家后端、无 `/auth/**` 子路由 ⇒ 带票请求 404 ⇒ fail-open 全放行（与「无票 401」是两回事）。修法 = nginx 加 `location /ops-api/auth/ → gateway /kb/api/auth/`。**排查判据**：无票 401 说明路由通、带票 404 说明路由缺 |
+| **49** | **`.npmrc` 里禁止内联 base64 `_auth`** —— 发版凭证走 `npm login` 或 CI secret，不要写进仓库文件 | R19 发现 `.npmrc` 含 `_auth=YWRtaW46…`（Nexus admin 口令的 base64，等价明文），已删除并只留 registry 配置。**提交前 `grep -n "_auth" .npmrc`** |
+| **50** | **无令牌时不发权限探针** —— `@marschat/app-kit` 0.1.9 起 `bootstrap()` 用 `shouldPrefetchPermissions(options, hasToken)` 门控预取：**没有令牌就不探** | 修复前只判 `prefetchPermissions !== false`，于是**登录页**（正常未登录态）每次加载都打一条 `GET <apiBase>/auth/permissions` ⇒ 必然 401。后果不是功能错，而是**噪声常态化**：控制台与服务端日志里 401 变成背景音，把坑 #44 特意做的「探针失败可归因告警」稀释掉，真故障反而看不出来。R19 实测 kb-ops / infra 登录页各 1 条；修复后登录页探针数 = 0。**语义边界**：`prefetchPermissions:false` 仍表示「有票也不预取」，与新门控是「与」关系 |
 
 ---
 
