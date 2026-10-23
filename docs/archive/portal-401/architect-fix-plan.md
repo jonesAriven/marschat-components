@@ -453,7 +453,7 @@ public final class RedirectAllowList {
 |---|---|---|---|
 | R1 | 端点异常影响登录页 | 低 | 端点整体 try/catch → `data:null`；前端 `fetch().catch` 静默降级；**登录流程零依赖** |
 | R2 | `SecurityConfig` matcher 误伤既有路径 | 极低 | 只增一个**新**路径；code review 盯这一行；回滚 = revert |
-| R3 | **多标签覆盖**：SavedRequest 是 session 级单例，两标签开两个应用的 SSO 时返回链接只对后者正确 | 中（**已存在**的限制） | 属 Spring Security `HttpSessionRequestCache` 固有语义（当前"登录后落到哪个应用"也是同一限制）；**登记进 `docs/TROUBLESHOOTING.md` 的"已知边界"**，不隐藏 |
+| R3 | **多标签覆盖**：SavedRequest 是 session 级单例，两标签开两个应用的 SSO 时返回链接只对后者正确 | 中（**已存在**的限制） | 属 Spring Security `HttpSessionRequestCache` 固有语义（当前"登录后落到哪个应用"也是同一限制）；**登记进 `docs/排查手册.md` 的"已知边界"**，不隐藏 |
 | R4 | F4 的"SavedRequest 不被消耗"是**未文档化依赖** | 中 | ①已实测；②上线前 V-A3/V-A7 **必须复验**；③若未来 Spring 升级改变行为 → 端点返回 `null`，**功能静默消失而非报错**（fail-soft） |
 | R5 | 依赖边缘 nginx 的 `/login` **前缀**匹配（F5） | 低 | 已在方案里显式指出；§2.5 步骤 4 提供显式 location 硬化；建议在 nginx 站点注释里补一句"`/login` 前缀被 login.html / login-context 共用" |
 | R6 | 应用登录页存在静默免登，点「返回」后被自动弹走 | 低-中 | 仅当**已有 IdP 会话**时才会（此时用户本来也不会停在 IdP 登录页）；V-A6 覆盖无会话场景。若用户仍觉得绕，见 §5 Q3 |
@@ -790,7 +790,7 @@ function roleTagType(role?: string | null) {
 | 需要同步升级的下游应用 | **无** |
 | 部署耦合 | Woodpecker repo_id=4（自动）；可选加 config-as-code（nginx） |
 | 故障域边界 | 端点整体 try/catch + 前端静默降级 → **最坏结果是"没有返回按钮"，不会比今天更差** |
-| 需登记的技术债 | ① `RedirectAllowList` 与 `AuthController#isAllowedRedirect` 短期重复（可后续收敛）；② SavedRequest 的「不被中间请求消耗」是未文档化依赖（F4），需写进 `TROUBLESHOOTING.md`；③ 多标签覆盖限制（R3） |
+| 需登记的技术债 | ① `RedirectAllowList` 与 `AuthController#isAllowedRedirect` 短期重复（可后续收敛）；② SavedRequest 的「不被中间请求消耗」是未文档化依赖（F4），需写进 `排查手册.md`；③ 多标签覆盖限制（R3） |
 
 ### 4.2 缺陷 B（改 npm 共享组件 = 5 个 SPA 宿主）
 

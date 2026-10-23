@@ -4,8 +4,8 @@
 
 统一管理所有自研系统的公共组件，包括前端 UI/工具库和后端核心库。
 
-> 📌 **权威文档在 [`docs/README.md`](./docs/README.md)**（设计 · 接入 · 使用运维三篇合一）。
-> 本文件只做「仓库门面 + 快速开始」，**接入细节、踩坑铁律、权限模型一律以 `docs/README.md` 为准**。
+> 📌 **权威文档在 [`docs/统一认证平台手册.md`](./docs/统一认证平台手册.md)**（设计 · 接入 · 使用运维三篇合一）。
+> 本文件只做「仓库门面 + 快速开始」，**接入细节、踩坑铁律、权限模型一律以 `docs/统一认证平台手册.md` 为准**。
 
 ## 📦 包概览
 
@@ -13,7 +13,7 @@
 
 | 包名 | 版本 | 说明 |
 |------|------|------|
-| `@marschat/app-kit` | `0.1.4` | **装配层**：`createMarschatApp()` 一行完成运行时配置/令牌/SSO/401续期/守卫/会话监视/权限预取/路由注册；`createShell()` 共享外壳（Phase 13 新增） |
+| `@marschat/app-kit` | `0.1.9` | **装配层**：`createMarschatApp()` 一行完成运行时配置/令牌/SSO/401续期/守卫/会话监视/权限预取/路由注册；`createShell()` 共享外壳（Phase 13 新增） |
 | `@marschat/auth-components` | `0.8.8` | 认证 UI（LoginPage/LoginPanel/SsoCallbackView）+ SSO client（PKCE/静默免登/续期）+ 用户管理面板×4（platform\|app 双作用域）+ PermissionGate + usePermissions/useMenus |
 | `@marschat/frontend-common` | `0.3.5` | createRequest（401 静默续期拦截器）、createAuthGuard 路由守卫、TokenStore、SidebarMenu |
 
@@ -24,7 +24,7 @@
 | `common-core` | `1.1.6` | 公共核心库（Result、异常处理、链路追踪、MyBatis-Plus 配置、事件总线） |
 | `auth-core` | `2.3.0` | 认证公共库（HS256 TokenProvider、RS256/JWKS OidcTokenVerifier、@MarsUser、@RequirePermission、菜单上报、Feign 透传、**BFF 管理代理自动装配：白名单配置化 + 凭据三模式 + 账号上报 SPI**、**登录校验放行配置化 `marschat.auth.anonymous`：路径级 Ant 通配 + 方法级精确 + 登录保底集**） |
 
-> 版本基线 **2026-10-15**（Phase 14 登录校验放行配置化上线后实测态：5/6 应用已迁移 + 五应用放行清单全部配置化）。升级前请核对 `docs/README.md` 的版本基线行与 `docs/CONFIG-REFERENCE.md` 的配置全表。
+> 版本基线 **2026-10-22**（app-kit 0.1.9「无令牌不预取权限」上线后实测态：五应用锁文件升级 + 逐条流水线部署）。升级前请核对 `docs/统一认证平台手册.md` 的版本基线行与 `docs/配置参考.md` 的配置全表。
 
 ## 🚀 快速开始
 
@@ -61,7 +61,7 @@ pnpm build:all
 ```
 marschat-components/
 ├── packages/                    # 前端 npm 包
-│   ├── app-kit/                 #   装配层（0.1.4）：createMarschatApp 一行接入 + createShell 共享外壳
+│   ├── app-kit/                 #   装配层（0.1.9）：createMarschatApp 一行接入 + createShell 共享外壳
 │   ├── auth-components/         #   认证 UI + SSO client（0.8.8）
 │   │   ├── src/
 │   │   │   ├── components/      #     LoginPage / LoginPanel / SsoCallbackView
@@ -83,7 +83,7 @@ marschat-components/
 │                                #          BFF 管理代理（白名单配置化 + 凭据三模式 + 账号上报 SPI）
 │                                #          登录校验放行配置化 marschat.auth.anonymous（路径级 + 方法级 + 保底集）
 ├── scripts/                     # 构建脚本
-├── docs/README.md               # 🔥 唯一权威手册
+├── docs/统一认证平台手册.md               # 🔥 唯一权威手册
 ├── pnpm-workspace.yaml
 └── package.json
 ```
@@ -198,25 +198,27 @@ pnpm publish
 
 | 文档 | 内容 |
 |------|------|
-| **[docs/README.md](./docs/README.md)** | 🔥 **权威手册（从这里开始）**：设计篇 / 接入篇（Level 0–5，含无构建静态页）/ 使用运维篇 + 39 条踩坑铁律 |
+| **[docs/统一认证平台手册.md](./docs/统一认证平台手册.md)** | 🔥 **权威手册（从这里开始）**：设计篇 / 接入篇（Level 0–5，含无构建静态页）/ 使用运维篇 + 50 条踩坑铁律 |
 | **[docs/Phase13-配置化接入.md](./docs/Phase13-配置化接入.md)** | **配置化接入（Phase 13 决策记录）**：架构审计 → 设计（三处配置 + 一行装配）→ 实现 → 自测 → 6 应用迁移路线 |
-| **[docs/STATUS.md](./docs/STATUS.md)** | ⏳ **未决项与待办**（唯一权威）：优先级清单 + 待拍板 + 已知取舍 + 下一轮路线 —— **接手先读** |
-| **[docs/CONFIG-REFERENCE.md](./docs/CONFIG-REFERENCE.md)** | 配置项 / 环境变量 / 端点 / 已注册 client / 数据库真源 全表 |
-| [docs/TROUBLESHOOTING.md](./docs/TROUBLESHOOTING.md) | 排查手册：症状 → 定位 → 根因 + 取证命令集 |
+| **[docs/状态与待办.md](./docs/状态与待办.md)** | ⏳ **未决项与待办**（唯一权威）：优先级清单 + 待拍板 + 已知取舍 + 下一轮路线 —— **接手先读** |
+| **[docs/配置参考.md](./docs/配置参考.md)** | 配置项 / 环境变量 / 端点 / 已注册 client / 数据库真源 全表 |
+| [docs/排查手册.md](./docs/排查手册.md) | 排查手册：症状 → 定位 → 根因 + 取证命令集 |
+| [docs/登录测试用例.md](./docs/登录测试用例.md) | 6 系统登录功能测试用例（URL / 登录方式 / 预期）—— 手工验收与回归起点 |
 | `docs/archive/phase12/Phase12全量验证报告-2026-09-17.md`、`docs/archive/phase12/R6多轮浏览器回归与缺陷修复-2026-09-18.md` | 验证与回归快照（历史证据） |
 
 **包内组件用法**
 
 | 文档 | 内容 |
 |------|------|
-| [packages/auth-components/README.md](./packages/auth-components/README.md) | 认证组件 API（LoginPage/LoginPanel/SsoCallbackView/各管理面板） |
-| [packages/auth-components/LOGIN-PAGE-USAGE.md](./packages/auth-components/LOGIN-PAGE-USAGE.md) | 统一登录页用法（含 `showLocalLogin` / `showMailLogin` 两个易漏字段） |
-| [packages/auth-components/FORGOT-PASSWORD-USAGE.md](./packages/auth-components/FORGOT-PASSWORD-USAGE.md) | 忘记密码四步状态机 |
-| [packages/frontend-common/README.md](./packages/frontend-common/README.md) | createRequest / createAuthGuard / TokenStore |
-| [java/auth-core/README.md](./java/auth-core/README.md) | 后端验签与权限注解 |
+| [packages/auth-components/使用说明.md](./packages/auth-components/使用说明.md) | 认证组件 API（LoginPage/LoginPanel/SsoCallbackView/各管理面板） |
+| [packages/app-kit/使用说明.md](./packages/app-kit/使用说明.md) | **装配层 API（推荐入口）**：`createMarschatApp` 一行接入 + `createShell` 共享外壳 + 全部 options 字段 |
+| [packages/auth-components/登录页使用说明.md](./packages/auth-components/登录页使用说明.md) | 统一登录页用法（含 `showLocalLogin` / `showMailLogin` 两个易漏字段） |
+| [packages/auth-components/忘记密码使用说明.md](./packages/auth-components/忘记密码使用说明.md) | 忘记密码四步状态机 |
+| [packages/frontend-common/使用说明.md](./packages/frontend-common/使用说明.md) | createRequest / createAuthGuard / TokenStore |
+| [java/auth-core/使用说明.md](./java/auth-core/使用说明.md) | 后端验签与权限注解 |
 | `devtools/docs/adr/` | 架构决策记录（决策史），最新为 `ADR-2026-09-16-Phase12-统一认证权限治理.md`；索引见同目录 `INDEX.md`。⚠️ **Phase 13 配置化接入的决策记录不在该目录**，见 `docs/Phase13-配置化接入.md` |
 
-> ⚠️ 早期曾存在 `docs/INTEGRATION-GUIDE.md`、`docs/SSO-IMPLEMENTATION-SUMMARY.md`、`docs/ADR-SSO-Cookie-Domain-Sharing.md`、`docs/AUTH-CENTER-COOKIE-GUIDE.md`、`docs/APP-UPGRADE-GUIDE.md` 等 7 份文档，**已全部合并进 `docs/README.md` 并从仓库删除**，旧链接会 404，勿再引用（沿革见 docs/README.md 文末附录）。
+> ⚠️ 早期曾存在 `docs/INTEGRATION-GUIDE.md`、`docs/SSO-IMPLEMENTATION-SUMMARY.md`、`docs/ADR-SSO-Cookie-Domain-Sharing.md`、`docs/AUTH-CENTER-COOKIE-GUIDE.md`、`docs/APP-UPGRADE-GUIDE.md` 等 7 份文档，**已全部合并进 `docs/统一认证平台手册.md` 并从仓库删除**，旧链接会 404，勿再引用（沿革见 docs/统一认证平台手册.md 文末附录）。
 
 ## 📄 License
 

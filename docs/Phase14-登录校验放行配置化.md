@@ -1,7 +1,7 @@
 # Phase 14 · 登录校验放行配置化（`marschat.auth.anonymous` / `anonymous-paths.json`）
 
 > **定位**：本文是「登录校验放行（匿名可达路径）配置化」的**决策与落地记录**（背景 → 设计 → 实现 → 自测 → 迁移 → 上线验证）。
-> **配套**：`README.md` 第二篇「登录校验放行配置化」（怎么接入）· `CONFIG-REFERENCE.md` §4.6 / §5.3（字段全表）· `STATUS.md`（本轮验证记录）。
+> **配套**：`统一认证平台手册.md` 第二篇「登录校验放行配置化」（怎么接入）· `配置参考.md` §4.3 / §5.3（字段全表）· `状态与待办.md`（本轮验证记录）。
 > **时效**：2026-10-15。**本文不含任何口令 / secret 明文**。
 
 ---
@@ -93,11 +93,11 @@ Spring MVC 拦截器与 Spring Security `requestMatchers` 均按 **context-path 
 
 ## 7. 遗留与后续
 
-> ⏳ **时点声明（2026-10-15）**：本节为收官时点登记。**未决项唯一真源 = `docs/STATUS.md`** —— 本节仅存指针，勿据此开工。
+> ⏳ **时点声明（2026-10-15）**：本节为收官时点登记。**未决项唯一真源 = `docs/状态与待办.md`** —— 本节仅存指针，勿据此开工。
 
-- **T-ENG-7 补机制二选一待良哥拍板**（A 动 auth-center 枢纽 / B portal 侧放宽，推荐 B）—— 与本轮无关，单独挂起 → `STATUS.md` §1.2 **T-ENG-7**。
-- activecode 匿名 generate 的频控 / 验证码 → `STATUS.md` §1.4 **T-LOW-19**。
-- cosmic 中间件目前只认 `Authorization: Bearer`；带票 200 已在端到端断言覆盖 → `STATUS.md` §1.4 **T-LOW-20**。
+- **T-ENG-7 补机制二选一待良哥拍板**（A 动 auth-center 枢纽 / B portal 侧放宽，推荐 B）—— 与本轮无关，单独挂起 → `状态与待办.md` §1.2 **T-ENG-7**。
+- activecode 匿名 generate 的频控 / 验证码 → `状态与待办.md` §1.4 **T-LOW-19**。
+- cosmic 中间件目前只认 `Authorization: Bearer`；带票 200 已在端到端断言覆盖 → `状态与待办.md` §1.4 **T-LOW-20**。
 
 ---
 

@@ -5,7 +5,7 @@
 - **范围**：6 个自研应用（portal / activecode / kb-web / kb-ops / infra-monitor / cosmic）+ 公共组件 + 认证中心
 - **方法**：**只信代码与配置，不信任任何历史结论**（手册/README、Phase 10/11 ADR 的结论一律按"待证"处理）
 - **约束**：本轮未修改任何代码；报告中不出现任何明文密码/secret
-- **时效声明（2026-10-15 追加）**：本文 P0/P1/P2 各项的**最终结局以 `../STATUS.md` §2「近期已闭合」为准**（§0 所述 4 个 P0 均已于 09-16/17 修复闭合）；本文仅记录 09-16 时点的**审计基线与取证方法**，**勿以本文的现状描述为现行依据**。
+- **时效声明（2026-10-15 追加）**：本文 P0/P1/P2 各项的**最终结局以 `../状态与待办.md` §2「近期已闭合」为准**（§0 所述 4 个 P0 均已于 09-16/17 修复闭合）；本文仅记录 09-16 时点的**审计基线与取证方法**，**勿以本文的现状描述为现行依据**。
 
 ---
 
@@ -301,7 +301,7 @@
 | **P2-1** | **F1 未修**：kb-gateway 与 auth-center 共享弱默认 JWT 密钥，明文硬编码在配置里 | `mykng/kb-gateway/src/main/resources/application.yml:166` → 改 env 注入 + 独立密钥 + 轮换 |
 | **P2-2** | **apps-registry.yml 明文 secret 默认值入库**：多个 `menu-report-secret` 与 portal `secret` 都带明文默认（`${ENV:明文}`），违反「任何文档不得出现明文 secret」铁律 | `devtools/apps-registry.yml:24`（portal client secret 弱默认）、`:45`、`:86`、`:113` → 默认值一律改为空，缺值即启动失败 |
 | **P2-3** | **activecode UMD 升到 ≥0.8.7** 并同步 `VENDORED-auth-core-umd.md`（版本/大小/sha256 三对齐）；建议加 CI 门禁比对 sha256 | `devtools/woodScript/sync-auth-core-umd.sh`、`active-manager/docs/VENDORED-auth-core-umd.md` |
-| **P2-4** | **文档漂移修正**：手册头部版本基线（0.8.6 → 0.8.7）；手册 §5「portal/activecode 无 public 菜单」中 activecode 已改为 1 个 public；ADR D16「portal 已派修」实际未修 | `marschat-components/docs/README.md:8, 90`；`ADR-2026-09-15-Phase11...md:45` |
+| **P2-4** | **文档漂移修正**：手册头部版本基线（0.8.6 → 0.8.7）；手册 §5「portal/activecode 无 public 菜单」中 activecode 已改为 1 个 public；ADR D16「portal 已派修」实际未修 | `marschat-components/docs/统一认证平台手册.md:8, 90`；`ADR-2026-09-15-Phase11...md:45` |
 | **P2-5** | **portal menu-registry 显式注释"本应用 0 个 public"**，避免后来者误判漏配 | `portal-server/src/main/resources/menu-registry.yml` |
 | ~~**P2-6**~~ | ✖ **已澄清：非缺陷（2026-09-16 更正，不留假待办）** —— 原判「`menu-registry` 写 `/users`，实际路由 `/settings/users`」**有误**：源码显示 `mykng/kb-web/src/router/index.ts:128` 的路由 `path:'users'` 与 `:120` 的 `settings` **同级**（`settings` 是**叶子路由**、不是带 `children` 的父路由），故实际路由 = `/{ctx}/users`，**与 menu-registry 的 `/users` 一致**；`views/settings/` 只是**文件目录归属**，不是路由层级。误判根因=把文件目录当路由层级。详见 `ADR-2026-09-16-Phase12-统一认证权限治理.md` §4.5 | —（**非缺陷，撤销**） |
 | **P2-7** | **cosmic `/admin` 改名**（如 `/members` 或把"本系统用户"拆成独立路由 `/users`），避免与「平台管理台」语义撞车 | `cosmic-studio/frontend/src/router.js`、`views/Admin.vue` |
@@ -355,6 +355,6 @@ Phase 10 的误判根因是「**只验 UI/链路，不验数据源**」（登录
 - **infra-monitor**：`infra-monitor-server/.../controller/AuthController.java`、`.../controller/AdminProxyController.java`、`.../config/InfraPermissionChecker.java`、`.../config/AuthzConfig.java`、`.../config/LocalAccountReporter.java`、`src/main/resources/menu-registry.yml`、`infra-monitor-web/src/main.ts`、`src/views/login/LoginView.vue`、`src/views/users/UsersView.vue`
 - **cosmic**：`app/auth.py`、`app/authz.py`、`app/menu_report.py`、`app/routers/auth.py`、`app/routers/studio.py`（MENU_REGISTRY）、`frontend/src/main.js`、`frontend/src/views/Login.vue`、`frontend/src/views/Admin.vue`、`docker-compose.yml`、`frontend/package.json`
 - **公共组件**：`packages/auth-components/src/components/UserManagementPanel.vue`（按钮与作用域逻辑）、`src/utils/userAdmin.ts`（scope / allowResetPassword / appRoles 契约）、`src/utils/sessionWatcher.ts`
-- **平台**：`devtools/apps-registry.yml`、`devtools/docs/adr/ADR-2026-09-15-Phase11-*.md`、`marschat-components/docs/README.md`、`devtools/docs/adr/INDEX.md`
+- **平台**：`devtools/apps-registry.yml`、`devtools/docs/adr/ADR-2026-09-15-Phase11-*.md`、`marschat-components/docs/统一认证平台手册.md`、`devtools/docs/adr/INDEX.md`
 
 > ⚠️ 本轮**未执行任何线上实测**（纯静态代码与配置审计）。标 ⚠️ 的项（尤其 ④ 忘记密码路由可达性、⑥ portal 菜单上报是否生效、⑩ activecode 会话监视器行为）建议由真浏览器回归脚本取证后回写本表。

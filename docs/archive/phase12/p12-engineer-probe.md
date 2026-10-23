@@ -231,7 +231,7 @@ kbgw JWT_SECRET sha256: 92712b1a3014caea0df7c79695f32e6e441b515a73c75830da580b43
 → **F1（遗留 🔴P2）判定：成立。** 任一服务的 token 可被对方签名/验签通过，鉴权边界失效。
 → 建议：kb-gateway 改用 auth-center 的 JWKS / 公钥验签，或至少拆分密钥；此项涉及鉴权链路，**不属于"低风险"，本次未动，需单独立项**。
 
-> ⚠️ **订正（2026-10-15）**：本节「两处共享」结论**不完整** —— `p12-f1-jwt-rotation-plan.md` §1 已订正为**三处**（第三处 = kb-ops，入口是 `MARSCHAT_AUTH_SECRET` 而非 `JWT_SECRET`，按后者 grep 会漏）。现行口径见 `../STATUS.md` T-DEC-1。
+> ⚠️ **订正（2026-10-15）**：本节「两处共享」结论**不完整** —— `p12-f1-jwt-rotation-plan.md` §1 已订正为**三处**（第三处 = kb-ops，入口是 `MARSCHAT_AUTH_SECRET` 而非 `JWT_SECRET`，按后者 grep 会漏）。现行口径见 `../状态与待办.md` T-DEC-1。
 
 补充：容器 env 键名盘点显示 auth-center 与 kb-gateway 都直接吃 `JWT_SECRET`；auth-center 另有 `MARSCHAT_AUTHZ_MODE` / `MARSCHAT_AUTHZ_STRICT_CLIENTS` / `MYSQL_*` / `NACOS_*`；kb-gateway 另有 `MARSCHAT_MENU_REPORT_SECRET`。
 
