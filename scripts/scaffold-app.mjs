@@ -28,12 +28,22 @@
 import { mkdirSync, readFileSync, writeFileSync, existsSync } from 'node:fs'
 import { dirname, join, resolve } from 'node:path'
 
+// 已知 flag 白名单：未知 flag 一律报错退出，防止「转抄笔误静默回落默认值」
+// （实测教训：把 --out 写成 --out-dir 时旧实现静默忽略，产物落到默认目录，
+//  接入方拿着空目录排查半天 —— 与「配置漂移不报错」同型的静默失效）。
+const KNOWN_FLAGS = ['app-id', 'context-path', 'out', 'name', 'token-prefix']
+
 function parseArgs(argv) {
   const out = {}
   for (let i = 0; i < argv.length; i++) {
     const a = argv[i]
     if (a.startsWith('--')) {
       const key = a.slice(2)
+      if (!KNOWN_FLAGS.includes(key)) {
+        console.error(`未知参数 ${a}（已知参数：${KNOWN_FLAGS.map(f => '--' + f).join(' / ')}）`)
+        console.error('拼错参数会静默回落默认值导致产物落错目录，已阻止；请核对后重试。')
+        process.exit(1)
+      }
       const val = argv[i + 1] && !argv[i + 1].startsWith('--') ? argv[++i] : 'true'
       out[key] = val
     }
